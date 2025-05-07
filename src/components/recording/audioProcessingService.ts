@@ -4,8 +4,8 @@ import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
 import { generateRealisticTranscription } from './utils';
 
-// Bucket name constant to ensure consistency
-const AUDIO_BUCKET_NAME = 'audio_recordings';
+// Bucket name constant to ensure consistency - using hyphen instead of underscore
+const AUDIO_BUCKET_NAME = 'audio-recordings';
 
 /**
  * Uploads audio to an existing bucket
