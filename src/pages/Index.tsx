@@ -1,18 +1,90 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { RecordingInterface } from '@/components/RecordingInterface';
 import { TranscriptionAnalysis } from '@/components/TranscriptionAnalysis';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
-import { FileText, BookOpenText, Speech } from 'lucide-react';
+import { FileText, BookOpenText, Speech, Plus, List } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import UserProfileButton from '@/components/UserProfileButton';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/components/ui/use-toast';
+
+interface Transcription {
+  id: string;
+  title: string;
+  content: string;
+  summary?: string;
+  action_items?: any[];
+  created_at: string;
+}
 
 const Index = () => {
+  const { user } = useAuth();
   const [transcription, setTranscription] = useState<string>('');
   const [showDemo, setShowDemo] = useState<boolean>(false);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [selectedTranscriptionId, setSelectedTranscriptionId] = useState<string | null>(null);
   
-  const handleTranscriptionReady = (text: string) => {
+  const { data: transcriptions, isLoading, refetch } = useQuery({
+    queryKey: ['transcriptions'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transcriptions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        throw error;
+      }
+      
+      return data as Transcription[];
+    }
+  });
+  
+  useEffect(() => {
+    if (selectedTranscriptionId && transcriptions) {
+      const selected = transcriptions.find(t => t.id === selectedTranscriptionId);
+      if (selected) {
+        setTranscription(selected.content);
+      }
+    }
+  }, [selectedTranscriptionId, transcriptions]);
+  
+  const handleTranscriptionReady = async (text: string) => {
     setTranscription(text);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    if (user && text.trim()) {
+      try {
+        const { data, error } = await supabase
+          .from('transcriptions')
+          .insert([
+            { 
+              user_id: user.id, 
+              content: text,
+              title: `Meeting on ${new Date().toLocaleDateString()}`,
+            }
+          ])
+          .select();
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Transcription saved!",
+          description: "Your meeting has been saved to your history."
+        });
+        
+        refetch();
+      } catch (error: any) {
+        toast({
+          variant: "destructive",
+          title: "Error saving transcription",
+          description: error.message
+        });
+      }
+    }
   };
 
   const loadDemoData = () => {
@@ -44,20 +116,70 @@ John: Yes, that's on the agenda for the second half of the meeting.
             <h1 className="text-2xl font-bold text-scribe-text">Scribe</h1>
           </div>
           
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
+            {user && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowHistory(!showHistory)}
+                className="flex items-center"
+              >
+                <List className="h-4 w-4 mr-1" />
+                {showHistory ? "Hide History" : "Show History"}
+              </Button>
+            )}
+            
             {!transcription && !showDemo && (
               <Button variant="outline" size="sm" onClick={loadDemoData}>
                 Load Demo
               </Button>
             )}
-            <Button variant="default" size="sm" className="bg-scribe-primary hover:bg-scribe-secondary">
+            
+            <Button 
+              variant="default" 
+              size="sm" 
+              className="bg-scribe-primary hover:bg-scribe-secondary"
+              onClick={() => {
+                setTranscription('');
+                setShowDemo(false);
+                setSelectedTranscriptionId(null);
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
               New Recording
             </Button>
+            
+            <UserProfileButton />
           </div>
         </div>
       </header>
       
       <main className="container mx-auto px-4 py-8">
+        {showHistory && transcriptions && transcriptions.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-semibold mb-4">Your Recordings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {transcriptions.map((item) => (
+                <div 
+                  key={item.id}
+                  className={`p-4 bg-white rounded-lg border cursor-pointer hover:shadow-md transition-all ${
+                    selectedTranscriptionId === item.id ? 'ring-2 ring-scribe-primary' : 'border-gray-200'
+                  }`}
+                  onClick={() => setSelectedTranscriptionId(item.id)}
+                >
+                  <h3 className="font-medium">{item.title}</h3>
+                  <p className="text-sm text-gray-500">
+                    {new Date(item.created_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                    {item.content.substring(0, 100)}...
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      
         {transcription || showDemo ? (
           <div className="space-y-8">
             <div className="text-center max-w-2xl mx-auto mb-8">
@@ -75,6 +197,7 @@ John: Yes, that's on the agenda for the second half of the meeting.
                 onClick={() => {
                   setTranscription('');
                   setShowDemo(false);
+                  setSelectedTranscriptionId(null);
                 }}
                 className="mx-auto"
               >
