@@ -31,14 +31,22 @@ export const supabase = createClient<Database>(
  * @returns The response from the Edge Function
  */
 export const invokeEdgeFunction = async <T = any>(functionName: string, payload?: any): Promise<T> => {
-  const { data, error } = await supabase.functions.invoke(functionName, {
-    body: payload
-  });
-  
-  if (error) {
-    console.error(`Error invoking ${functionName}:`, error);
+  try {
+    console.log(`Invoking edge function ${functionName} with:`, payload);
+    
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body: payload
+    });
+    
+    if (error) {
+      console.error(`Error invoking ${functionName}:`, error);
+      throw error;
+    }
+    
+    console.log(`Edge function ${functionName} response:`, data);
+    return data as T;
+  } catch (error) {
+    console.error(`Exception invoking ${functionName}:`, error);
     throw error;
   }
-  
-  return data as T;
 };

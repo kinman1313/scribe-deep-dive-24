@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,6 +23,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
   const [recordingTime, setRecordingTime] = useState<number>(0);
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [useDemoData, setUseDemoData] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -40,6 +42,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
 
   const startRecording = async () => {
     audioChunksRef.current = [];
+    setUseDemoData(false);
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -132,8 +135,11 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         .upload(filePath, audioFile);
         
       if (uploadError) {
+        console.error('Upload error:', uploadError);
         throw new Error(`Error uploading audio: ${uploadError.message}`);
       }
+
+      console.log('File uploaded successfully:', uploadData);
 
       // Get the public URL for the uploaded file
       const { data: publicUrlData } = supabase.storage
@@ -145,13 +151,22 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       }
 
       const audioUrl = publicUrlData.publicUrl;
+      console.log('Audio URL:', audioUrl);
       
       // Call the Edge Function to process the audio
+      console.log('Invoking edge function with payload:', {
+        audioUrl,
+        fileName,
+        userId: user.id
+      });
+      
       const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
         audioUrl,
         fileName,
         userId: user.id
       });
+      
+      console.log('Edge function response:', result);
       
       setIsProcessing(false);
       
@@ -172,10 +187,11 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       toast({
         variant: "destructive",
         title: "Processing failed",
-        description: error instanceof Error ? error.message : "Failed to process recording",
+        description: error instanceof Error ? error.message : "Failed to process recording. Using demo data instead.",
       });
       
       // Fallback to demo transcription if edge function fails
+      setUseDemoData(true);
       const demoTranscription = generateRealisticTranscription();
       onTranscriptionReady(demoTranscription);
     }
@@ -225,6 +241,11 @@ ${speakers[0]}: Yes, that's coming up next on our agenda.
                   ? 'Transcribing and analyzing your recording...'
                   : 'Click the button below to start recording your meeting'}
             </p>
+            {useDemoData && (
+              <p className="text-xs text-amber-600 mt-2">
+                Note: Currently showing demo data. Check console for debugging information.
+              </p>
+            )}
           </div>
           
           <div className="relative">
