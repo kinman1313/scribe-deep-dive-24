@@ -23,3 +23,22 @@ export const supabase = createClient<Database>(
     }
   }
 );
+
+/**
+ * Invokes a Supabase Edge Function with the given name and payload
+ * @param functionName The name of the Edge Function to invoke
+ * @param payload The payload to send to the Edge Function
+ * @returns The response from the Edge Function
+ */
+export const invokeEdgeFunction = async <T = any>(functionName: string, payload?: any): Promise<T> => {
+  const { data, error } = await supabase.functions.invoke(functionName, {
+    body: payload
+  });
+  
+  if (error) {
+    console.error(`Error invoking ${functionName}:`, error);
+    throw error;
+  }
+  
+  return data as T;
+};
