@@ -4,7 +4,12 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2'
-import { corsHeaders } from '../_shared/cors.ts'
+
+// Define CORS headers directly in this file
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 const openAIApiKey = Deno.env.get('OPENAI_API_KEY')
 
