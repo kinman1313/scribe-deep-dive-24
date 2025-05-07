@@ -23,7 +23,6 @@ interface Transcription {
 const Index = () => {
   const { user } = useAuth();
   const [transcription, setTranscription] = useState<string>('');
-  const [showDemo, setShowDemo] = useState<boolean>(false);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [selectedTranscriptionId, setSelectedTranscriptionId] = useState<string | null>(null);
   
@@ -87,26 +86,6 @@ const Index = () => {
     }
   };
 
-  const loadDemoData = () => {
-    setShowDemo(true);
-    const demoTranscription = `
-John: Hi everyone, thanks for joining today's call about the Q3 marketing plan.
-Sarah: Thanks John, I've prepared some data on our previous campaign performance.
-John: Great! Let's start with the social media strategy.
-Sarah: Based on our Q2 results, we should increase our budget for LinkedIn campaigns by 15%.
-Michael: I agree with Sarah. The LinkedIn campaigns had a 24% higher conversion rate compared to other platforms.
-John: Good point. We need to finalize the budget allocation by next Monday and share it with the finance team.
-Sarah: I can prepare the breakdown and send it to everyone by Friday.
-John: Perfect! Let's move on to the content calendar for Q3.
-Michael: I suggest we focus on product updates and customer testimonials for the first month.
-John: That makes sense. Can you prepare a draft content plan by our next meeting?
-Michael: Yes, I'll have it ready by then.
-Sarah: Should we also discuss our upcoming product launch?
-John: Yes, that's on the agenda for the second half of the meeting.
-    `;
-    setTranscription(demoTranscription);
-  };
-
   return (
     <div className="min-h-screen bg-scribe-background">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
@@ -129,19 +108,12 @@ John: Yes, that's on the agenda for the second half of the meeting.
               </Button>
             )}
             
-            {!transcription && !showDemo && (
-              <Button variant="outline" size="sm" onClick={loadDemoData}>
-                Load Demo
-              </Button>
-            )}
-            
             <Button 
               variant="default" 
               size="sm" 
               className="bg-scribe-primary hover:bg-scribe-secondary"
               onClick={() => {
                 setTranscription('');
-                setShowDemo(false);
                 setSelectedTranscriptionId(null);
               }}
             >
@@ -180,7 +152,7 @@ John: Yes, that's on the agenda for the second half of the meeting.
           </div>
         )}
       
-        {transcription || showDemo ? (
+        {transcription ? (
           <div className="space-y-8">
             <div className="text-center max-w-2xl mx-auto mb-8">
               <h2 className="text-3xl font-bold text-scribe-text">Meeting Analysis</h2>
@@ -196,7 +168,6 @@ John: Yes, that's on the agenda for the second half of the meeting.
                 variant="outline" 
                 onClick={() => {
                   setTranscription('');
-                  setShowDemo(false);
                   setSelectedTranscriptionId(null);
                 }}
                 className="mx-auto"

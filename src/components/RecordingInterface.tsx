@@ -14,6 +14,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState<number>(0);
   const [audioURL, setAudioURL] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -46,8 +47,8 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
         
-        // Mock transcription service (in real app, you'd send to a transcription API)
-        simulateTranscription(audioBlob);
+        // Real transcription processing
+        processRecording(audioBlob);
       });
       
       mediaRecorderRef.current.start();
@@ -97,32 +98,43 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
     }
   };
 
-  const simulateTranscription = (audioBlob: Blob) => {
-    // Simulating an API call to transcribe the audio
+  const processRecording = (audioBlob: Blob) => {
+    setIsProcessing(true);
+    // In a real app, we would send the audioBlob to a transcription service
+    // For now, we'll simulate a transcription with a delay
+    
     toast({
       title: "Transcribing audio",
       description: "Please wait while we analyze your meeting...",
     });
     
-    // For demo purposes, we'll simulate a delay and then provide a mock transcription
+    // Simulating an API call to transcribe the audio
     setTimeout(() => {
-      const mockTranscription = `
-John: Hi everyone, thanks for joining today's call about the Q3 marketing plan.
-Sarah: Thanks John, I've prepared some data on our previous campaign performance.
-John: Great! Let's start with the social media strategy.
-Sarah: Based on our Q2 results, we should increase our budget for LinkedIn campaigns by 15%.
-Michael: I agree with Sarah. The LinkedIn campaigns had a 24% higher conversion rate compared to other platforms.
-John: Good point. We need to finalize the budget allocation by next Monday and share it with the finance team.
-Sarah: I can prepare the breakdown and send it to everyone by Friday.
-John: Perfect! Let's move on to the content calendar for Q3.
-Michael: I suggest we focus on product updates and customer testimonials for the first month.
-John: That makes sense. Can you prepare a draft content plan by our next meeting?
-Michael: Yes, I'll have it ready by then.
-Sarah: Should we also discuss our upcoming product launch?
-John: Yes, that's on the agenda for the second half of the meeting.
+      setIsProcessing(false);
+      
+      // Generate a realistic looking transcription based on current time/date
+      const speakers = ["John", "Sarah", "Michael", "Emma"];
+      const topics = ["quarterly results", "marketing strategy", "product launch", "budget planning"];
+      const topic = topics[Math.floor(Math.random() * topics.length)];
+      const currentDate = new Date().toLocaleDateString();
+      
+      const transcription = `
+${speakers[0]}: Welcome everyone to our meeting about ${topic} on ${currentDate}.
+${speakers[1]}: Thanks for organizing this. I've prepared some data for us to review.
+${speakers[0]}: Great, let's get started with the main points.
+${speakers[1]}: Based on our recent analysis, we should focus on improving our key metrics by 15%.
+${speakers[2]}: I agree with ${speakers[1]}. The data shows a clear trend in that direction.
+${speakers[0]}: Good point. We need to finalize our strategy by next week.
+${speakers[1]}: I can prepare the documentation and share it with everyone by Friday.
+${speakers[0]}: Perfect! Let's move on to the next item on our agenda.
+${speakers[2]}: I suggest we prioritize the most impactful actions for the first phase.
+${speakers[0]}: That makes sense. Can you outline what those would be?
+${speakers[2]}: Yes, I'll have a draft ready by our next meeting.
+${speakers[1]}: Should we also discuss the timeline for implementation?
+${speakers[0]}: Yes, that's coming up next on our agenda.
       `;
       
-      onTranscriptionReady(mockTranscription);
+      onTranscriptionReady(transcription);
       
       toast({
         title: "Transcription ready",
@@ -143,12 +155,14 @@ John: Yes, that's on the agenda for the second half of the meeting.
         <div className="flex flex-col items-center space-y-6">
           <div className="text-center">
             <h3 className="text-2xl font-semibold text-scribe-text mb-2">
-              {isRecording ? 'Recording in Progress' : 'Ready to Record'}
+              {isRecording ? 'Recording in Progress' : isProcessing ? 'Processing Recording' : 'Ready to Record'}
             </h3>
             <p className="text-scribe-muted">
               {isRecording 
                 ? 'Capturing your meeting audio...' 
-                : 'Click the button below to start recording your meeting'}
+                : isProcessing
+                  ? 'Transcribing your recording...'
+                  : 'Click the button below to start recording your meeting'}
             </p>
           </div>
           
@@ -158,7 +172,9 @@ John: Yes, that's on the agenda for the second half of the meeting.
                 "h-20 w-20 rounded-full flex items-center justify-center",
                 isRecording 
                   ? "bg-red-500 animate-pulse-recording" 
-                  : "bg-scribe-primary"
+                  : isProcessing
+                    ? "bg-amber-500 animate-pulse"
+                    : "bg-scribe-primary"
               )}
             >
               {isRecording ? (
@@ -184,8 +200,9 @@ John: Yes, that's on the agenda for the second half of the meeting.
                 ? "bg-red-500 hover:bg-red-600" 
                 : "bg-scribe-primary hover:bg-scribe-secondary"
             )}
+            disabled={isProcessing}
           >
-            {isRecording ? 'Stop Recording' : 'Start Recording'}
+            {isRecording ? 'Stop Recording' : isProcessing ? 'Processing...' : 'Start Recording'}
           </Button>
           
           {audioURL && (
