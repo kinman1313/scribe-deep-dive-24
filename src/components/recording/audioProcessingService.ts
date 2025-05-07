@@ -4,6 +4,48 @@ import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
 import { generateRealisticTranscription } from './utils';
 
+// Bucket name constant to ensure consistency
+const AUDIO_BUCKET_NAME = 'audio_recordings';
+
+/**
+ * Ensures the audio recordings bucket exists in Supabase
+ * Creates it if it doesn't exist
+ */
+async function ensureBucketExists() {
+  try {
+    // Check if bucket exists
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    
+    if (error) {
+      console.error('Error checking buckets:', error);
+      throw error;
+    }
+    
+    const bucketExists = buckets.some(bucket => bucket.name === AUDIO_BUCKET_NAME);
+    
+    // Create bucket if it doesn't exist
+    if (!bucketExists) {
+      console.log(`Creating bucket: ${AUDIO_BUCKET_NAME}`);
+      const { error: createError } = await supabase.storage.createBucket(AUDIO_BUCKET_NAME, {
+        public: true, // Allow public access to files
+      });
+      
+      if (createError) {
+        console.error('Error creating bucket:', createError);
+        throw createError;
+      }
+      console.log(`Successfully created bucket: ${AUDIO_BUCKET_NAME}`);
+    } else {
+      console.log(`Bucket ${AUDIO_BUCKET_NAME} already exists`);
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error ensuring bucket exists:', error);
+    return false;
+  }
+}
+
 export async function processRecording(
   audioBlob: Blob,
   userId: string,
@@ -17,6 +59,12 @@ export async function processRecording(
       throw new Error("User not authenticated");
     }
 
+    // Ensure bucket exists before upload
+    const bucketReady = await ensureBucketExists();
+    if (!bucketReady) {
+      throw new Error("Failed to prepare storage bucket");
+    }
+
     // Generate a file name based on date and time
     const fileName = `recording_${Date.now()}.wav`;
     const filePath = `${userId}/${fileName}`;
@@ -24,9 +72,11 @@ export async function processRecording(
     // Create a File from the Blob
     const audioFile = new File([audioBlob], fileName, { type: 'audio/wav' });
     
+    console.log(`Uploading file to ${AUDIO_BUCKET_NAME}/${filePath}`);
+    
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('audio_recordings')
+      .from(AUDIO_BUCKET_NAME)
       .upload(filePath, audioFile);
       
     if (uploadError) {
@@ -38,7 +88,7 @@ export async function processRecording(
 
     // Get the public URL for the uploaded file
     const { data: publicUrlData } = supabase.storage
-      .from('audio_recordings')
+      .from(AUDIO_BUCKET_NAME)
       .getPublicUrl(filePath);
 
     if (!publicUrlData || !publicUrlData.publicUrl) {
