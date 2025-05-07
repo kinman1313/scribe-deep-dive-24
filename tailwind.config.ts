@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,17 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				// Scribe theme colors
+				scribe: {
+					primary: '#2563EB', // blue-600
+					secondary: '#1D4ED8', // blue-700
+					accent: '#3B82F6', // blue-500
+					highlight: '#F97316', // orange-500
+					background: '#F9FAFB', // gray-50
+					card: '#FFFFFF',
+					text: '#1F2937', // gray-800
+					muted: '#6B7280', // gray-500
 				}
 			},
 			borderRadius: {
@@ -84,11 +96,16 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'pulse-recording': {
+					'0%, 100%': { opacity: '1' },
+					'50%': { opacity: '0.5' },
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'pulse-recording': 'pulse-recording 2s ease-in-out infinite',
 			}
 		}
 	},
