@@ -17,6 +17,7 @@ interface RequestPayload {
   audioUrl: string
   fileName: string
   userId: string
+  audioBlob?: Blob
 }
 
 interface TranscriptionResult {

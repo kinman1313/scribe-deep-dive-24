@@ -8,42 +8,36 @@ import { generateRealisticTranscription } from './utils';
 const AUDIO_BUCKET_NAME = 'audio_recordings';
 
 /**
- * Ensures the audio recordings bucket exists in Supabase
- * Creates it if it doesn't exist
+ * Uploads audio to an existing bucket
+ * This function assumes the bucket already exists
  */
-async function ensureBucketExists() {
-  try {
-    // Check if bucket exists
-    const { data: buckets, error } = await supabase.storage.listBuckets();
+async function uploadAudioToStorage(audioFile: File, userId: string, fileName: string) {
+  const filePath = `${userId}/${fileName}`;
+  
+  console.log(`Uploading file to ${AUDIO_BUCKET_NAME}/${filePath}`);
+  
+  // Upload to Supabase Storage
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from(AUDIO_BUCKET_NAME)
+    .upload(filePath, audioFile);
     
-    if (error) {
-      console.error('Error checking buckets:', error);
-      throw error;
-    }
-    
-    const bucketExists = buckets.some(bucket => bucket.name === AUDIO_BUCKET_NAME);
-    
-    // Create bucket if it doesn't exist
-    if (!bucketExists) {
-      console.log(`Creating bucket: ${AUDIO_BUCKET_NAME}`);
-      const { error: createError } = await supabase.storage.createBucket(AUDIO_BUCKET_NAME, {
-        public: true, // Allow public access to files
-      });
-      
-      if (createError) {
-        console.error('Error creating bucket:', createError);
-        throw createError;
-      }
-      console.log(`Successfully created bucket: ${AUDIO_BUCKET_NAME}`);
-    } else {
-      console.log(`Bucket ${AUDIO_BUCKET_NAME} already exists`);
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error ensuring bucket exists:', error);
-    return false;
+  if (uploadError) {
+    console.error('Upload error:', uploadError);
+    throw new Error(`Error uploading audio: ${uploadError.message}`);
   }
+
+  console.log('File uploaded successfully:', uploadData);
+
+  // Get the public URL for the uploaded file
+  const { data: publicUrlData } = supabase.storage
+    .from(AUDIO_BUCKET_NAME)
+    .getPublicUrl(filePath);
+
+  if (!publicUrlData || !publicUrlData.publicUrl) {
+    throw new Error("Failed to get public URL for audio file");
+  }
+
+  return publicUrlData.publicUrl;
 }
 
 export async function processRecording(
@@ -59,43 +53,22 @@ export async function processRecording(
       throw new Error("User not authenticated");
     }
 
-    // Ensure bucket exists before upload
-    const bucketReady = await ensureBucketExists();
-    if (!bucketReady) {
-      throw new Error("Failed to prepare storage bucket");
-    }
-
     // Generate a file name based on date and time
     const fileName = `recording_${Date.now()}.wav`;
-    const filePath = `${userId}/${fileName}`;
     
     // Create a File from the Blob
     const audioFile = new File([audioBlob], fileName, { type: 'audio/wav' });
     
-    console.log(`Uploading file to ${AUDIO_BUCKET_NAME}/${filePath}`);
+    // Try to upload to the existing bucket
+    let audioUrl;
+    try {
+      audioUrl = await uploadAudioToStorage(audioFile, userId, fileName);
+    } catch (error) {
+      console.error('Error uploading to storage:', error);
+      // We'll fall back to using FormData in the edge function
+      throw new Error("Unable to upload audio to storage. Using direct upload instead.");
+    }
     
-    // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(AUDIO_BUCKET_NAME)
-      .upload(filePath, audioFile);
-      
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      throw new Error(`Error uploading audio: ${uploadError.message}`);
-    }
-
-    console.log('File uploaded successfully:', uploadData);
-
-    // Get the public URL for the uploaded file
-    const { data: publicUrlData } = supabase.storage
-      .from(AUDIO_BUCKET_NAME)
-      .getPublicUrl(filePath);
-
-    if (!publicUrlData || !publicUrlData.publicUrl) {
-      throw new Error("Failed to get public URL for audio file");
-    }
-
-    const audioUrl = publicUrlData.publicUrl;
     console.log('Audio URL:', audioUrl);
     
     // Call the Edge Function to process the audio
