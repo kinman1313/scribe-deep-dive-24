@@ -31,12 +31,40 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+  
+  console.log(`Edge function process-audio - received ${req.method} request`);
 
   try {
+    // Check if OpenAI API key is available immediately
+    if (!openAIApiKey) {
+      console.error('OpenAI API key is not configured');
+      return new Response(
+        JSON.stringify({ 
+          error: 'OpenAI API key is not configured', 
+          errorType: 'configuration' 
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
     // Create a Supabase client with the Auth context of the function
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase URL or anon key is not configured');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Supabase configuration is missing', 
+          errorType: 'configuration' 
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      supabaseUrl,
+      supabaseAnonKey,
       {
         global: {
           headers: { Authorization: req.headers.get('Authorization')! },
@@ -44,17 +72,42 @@ serve(async (req) => {
       }
     )
     
-    console.log('Edge function started');
+    console.log('Edge function started - Supabase client created');
+    
+    // Get the authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      console.error('Missing Authorization header');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Missing Authorization header', 
+          errorType: 'auth' 
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Get the request payload
-    const requestData = await req.json().catch(error => {
+    let requestData;
+    try {
+      requestData = await req.json();
+    } catch (error) {
       console.error('Error parsing request JSON:', error);
-      return null;
-    });
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid JSON in request body', 
+          errorType: 'request' 
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
     
     if (!requestData) {
       return new Response(
-        JSON.stringify({ error: 'Invalid JSON in request body' }),
+        JSON.stringify({ 
+          error: 'Empty request body', 
+          errorType: 'request' 
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -65,27 +118,32 @@ serve(async (req) => {
     
     if (!audioUrl || !fileName || !userId) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields', received: { audioUrl: !!audioUrl, fileName: !!fileName, userId: !!userId } }),
+        JSON.stringify({ 
+          error: 'Missing required fields', 
+          received: { audioUrl: !!audioUrl, fileName: !!fileName, userId: !!userId },
+          errorType: 'request'
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Check if OpenAI API key is available
-    if (!openAIApiKey) {
-      console.error('OpenAI API key is not configured');
-      return new Response(
-        JSON.stringify({ error: 'OpenAI API key is not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     console.log('Attempting to fetch audio file from URL:', audioUrl);
 
     // 1. Download the audio file from the URL
-    const audioResponse = await fetch(audioUrl).catch(error => {
+    let audioResponse;
+    try {
+      audioResponse = await fetch(audioUrl);
+    } catch (error) {
       console.error('Fetch error:', error);
-      return null;
-    });
+      return new Response(
+        JSON.stringify({ 
+          error: `Failed to fetch audio file: ${error instanceof Error ? error.message : 'Network error'}`,
+          url: audioUrl,
+          errorType: 'network'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
     
     if (!audioResponse || !audioResponse.ok) {
       const status = audioResponse?.status || 'unknown';
@@ -96,7 +154,8 @@ serve(async (req) => {
         JSON.stringify({ 
           error: `Failed to fetch audio file: ${statusText}`,
           status: status,
-          url: audioUrl 
+          url: audioUrl,
+          errorType: 'storage'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -105,19 +164,31 @@ serve(async (req) => {
     console.log('Audio file fetched successfully');
 
     // 2. Get audio data as blob
-    const audioBlob = await audioResponse.blob().catch(error => {
+    let audioBlob;
+    try {
+      audioBlob = await audioResponse.blob();
+    } catch (error) {
       console.error('Blob conversion error:', error);
-      return null;
-    });
-    
-    if (!audioBlob) {
       return new Response(
-        JSON.stringify({ error: 'Failed to convert audio response to blob' }),
+        JSON.stringify({ 
+          error: `Failed to convert audio response to blob: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          errorType: 'conversion'
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
     
-    console.log('Audio blob size:', audioBlob.size);
+    if (!audioBlob || audioBlob.size === 0) {
+      return new Response(
+        JSON.stringify({ 
+          error: audioBlob ? 'Audio blob is empty (zero size)' : 'Failed to convert audio response to blob',
+          errorType: 'conversion'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    console.log('Audio blob created successfully. Size:', audioBlob.size, 'Type:', audioBlob.type);
     
     // 3. Create a FormData object for the OpenAI API
     const formData = new FormData()
@@ -128,16 +199,25 @@ serve(async (req) => {
     console.log('Calling OpenAI transcription API');
     
     // 4. Call the OpenAI API for transcription
-    const transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openAIApiKey}`
-      },
-      body: formData
-    }).catch(error => {
+    let transcriptionResponse;
+    try {
+      transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openAIApiKey}`
+        },
+        body: formData
+      });
+    } catch (error) {
       console.error('OpenAI API fetch error:', error);
-      return null;
-    });
+      return new Response(
+        JSON.stringify({ 
+          error: `OpenAI API request failed: ${error instanceof Error ? error.message : 'Network error'}`,
+          errorType: 'openai'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     if (!transcriptionResponse || !transcriptionResponse.ok) {
       let errorDetails = 'Unknown error';
@@ -151,21 +231,37 @@ serve(async (req) => {
       console.error('Error details:', errorDetails);
       
       return new Response(
-        JSON.stringify({ error: `OpenAI API error: ${errorDetails}` }),
+        JSON.stringify({ 
+          error: `OpenAI API error: ${errorDetails}`, 
+          status: transcriptionResponse?.status,
+          errorType: 'openai'
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     console.log('OpenAI transcription successful');
 
-    const transcriptionData = await transcriptionResponse.json().catch(error => {
+    let transcriptionData;
+    try {
+      transcriptionData = await transcriptionResponse.json();
+    } catch (error) {
       console.error('Error parsing transcription response:', error);
-      return null;
-    });
+      return new Response(
+        JSON.stringify({ 
+          error: `Failed to parse OpenAI response: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          errorType: 'parsing'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
     
     if (!transcriptionData || !transcriptionData.text) {
       return new Response(
-        JSON.stringify({ error: 'Invalid response from OpenAI API' }),
+        JSON.stringify({ 
+          error: 'Invalid or empty response from OpenAI API',
+          errorType: 'openai'
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -240,26 +336,25 @@ serve(async (req) => {
       });
   
       if (!analysisResponse.ok) {
-        const errorDetails = await analysisResponse.text();
-        console.error('Analysis API error:', errorDetails);
-        throw new Error(`OpenAI Analysis API error: ${errorDetails}`);
-      }
-  
-      const analysisData = await analysisResponse.json();
-      const analysisText = analysisData.choices[0].message.content;
-      console.log('Analysis received, processing sections');
-  
-      // Extract summary and action items from the analysis
-      const sections = analysisText.split('\n\n');
-      for (const section of sections) {
-        if (section.toLowerCase().includes('summary')) {
-          summary = section.replace(/^summary:?/i, '').trim();
-        } else if (section.toLowerCase().includes('action item')) {
-          // Split into individual action items
-          const items = section.split('\n');
-          for (const item of items) {
-            if (item.trim() && !item.toLowerCase().includes('action item')) {
-              actionItems.push(item.trim());
+        // Continue with just the transcription if analysis fails
+        console.error('Analysis API error:', await analysisResponse.text());
+      } else {
+        const analysisData = await analysisResponse.json();
+        const analysisText = analysisData.choices[0].message.content;
+        console.log('Analysis received, processing sections');
+    
+        // Extract summary and action items from the analysis
+        const sections = analysisText.split('\n\n');
+        for (const section of sections) {
+          if (section.toLowerCase().includes('summary')) {
+            summary = section.replace(/^summary:?/i, '').trim();
+          } else if (section.toLowerCase().includes('action item')) {
+            // Split into individual action items
+            const items = section.split('\n');
+            for (const item of items) {
+              if (item.trim() && !item.toLowerCase().includes('action item')) {
+                actionItems.push(item.trim());
+              }
             }
           }
         }
@@ -316,8 +411,9 @@ serve(async (req) => {
     
     return new Response(
       JSON.stringify({ 
-        error: error.message || 'Unknown error occurred',
-        location: error.stack || 'No stack trace available'
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        location: error instanceof Error && error.stack ? error.stack : 'No stack trace available',
+        errorType: 'server'
       }),
       { 
         status: 500, 

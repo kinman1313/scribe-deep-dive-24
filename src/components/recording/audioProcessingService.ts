@@ -68,8 +68,7 @@ export async function processRecording(
       audioUrl = await uploadAudioToStorage(audioFile, userId, fileName);
     } catch (error) {
       console.error('Error uploading to storage:', error);
-      // We'll fall back to using FormData in the edge function
-      throw new Error("Unable to upload audio to storage. Using direct upload instead.");
+      throw new Error(`Storage upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     
     console.log('Audio URL:', audioUrl);
@@ -81,24 +80,41 @@ export async function processRecording(
       userId
     });
     
-    const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
-      audioUrl,
-      fileName,
-      userId
-    });
-    
-    console.log('Edge function response:', result);
-    
-    if (result && result.transcription) {
-      onComplete(result.transcription);
-      
-      toast({
-        title: "Transcription ready",
-        description: "Your meeting has been transcribed successfully",
+    try {
+      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
+        audioUrl,
+        fileName,
+        userId
       });
-      return;
-    } else {
-      throw new Error("Transcription failed or returned empty results");
+      
+      console.log('Edge function response:', result);
+      
+      if (result && result.transcription) {
+        onComplete(result.transcription);
+        
+        toast({
+          title: "Transcription ready",
+          description: "Your meeting has been transcribed successfully",
+        });
+        return;
+      } else {
+        throw new Error("Transcription failed or returned empty results");
+      }
+    } catch (error: any) {
+      console.error('Edge function error:', error);
+      
+      // Attempt to extract more detailed error information
+      let errorMessage = "Unknown error";
+      if (error && typeof error === 'object') {
+        if ('message' in error) {
+          errorMessage = error.message;
+        }
+        if ('error' in error && typeof error.error === 'object' && error.error && 'message' in error.error) {
+          errorMessage = error.error.message;
+        }
+      }
+      
+      throw new Error(`Process-audio function failed: ${errorMessage}`);
     }
   } catch (error) {
     console.error('Error processing recording:', error);
