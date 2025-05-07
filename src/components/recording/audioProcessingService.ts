@@ -37,6 +37,7 @@ async function uploadAudioToStorage(audioFile: File, userId: string, fileName: s
     throw new Error("Failed to get public URL for audio file");
   }
 
+  console.log('Got public URL:', publicUrlData.publicUrl);
   return publicUrlData.publicUrl;
 }
 
@@ -58,6 +59,8 @@ export async function processRecording(
     
     // Create a File from the Blob
     const audioFile = new File([audioBlob], fileName, { type: 'audio/wav' });
+    
+    console.log('File created:', fileName, 'Size:', audioFile.size, 'Type:', audioFile.type);
     
     // Try to upload to the existing bucket
     let audioUrl;
