@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Mic, MicOff, FileText, CheckCheck, Speech } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface RecordingInterfaceProps {
   onTranscriptionReady: (transcription: string) => void;
@@ -18,6 +20,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     return () => {
@@ -98,27 +101,72 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
     }
   };
 
-  const processRecording = (audioBlob: Blob) => {
+  const processRecording = async (audioBlob: Blob) => {
     setIsProcessing(true);
-    // In a real app, we would send the audioBlob to a transcription service
-    // For now, we'll simulate a transcription with a delay
     
     toast({
       title: "Transcribing audio",
       description: "Please wait while we analyze your meeting...",
     });
     
-    // Simulating an API call to transcribe the audio
-    setTimeout(() => {
+    try {
+      // Upload audio file to Supabase Storage
+      if (user) {
+        // Generate a file name based on date and time
+        const fileName = `recording_${Date.now()}.wav`;
+        const filePath = `${user.id}/${fileName}`;
+        
+        // Create a File from the Blob
+        const audioFile = new File([audioBlob], fileName, { type: 'audio/wav' });
+        
+        // Upload to Supabase Storage
+        const { error: uploadError } = await supabase.storage
+          .from('audio_recordings')
+          .upload(filePath, audioFile);
+          
+        if (uploadError) {
+          throw new Error(`Error uploading audio: ${uploadError.message}`);
+        }
+
+        // In a real-world application, you would send the audio to a transcription API
+        // For now, we'll use a simple simulation with more realistic meeting content
+        
+        // Simulate processing delay
+        setTimeout(() => {
+          setIsProcessing(false);
+          
+          // Create a more realistic transcription from the recording
+          const transcription = generateRealisticTranscription();
+          
+          onTranscriptionReady(transcription);
+          
+          toast({
+            title: "Transcription ready",
+            description: "Your meeting has been transcribed successfully",
+          });
+        }, 3000);
+      } else {
+        throw new Error("User not authenticated");
+      }
+    } catch (error) {
+      console.error('Error processing recording:', error);
       setIsProcessing(false);
       
-      // Generate a realistic looking transcription based on current time/date
-      const speakers = ["John", "Sarah", "Michael", "Emma"];
-      const topics = ["quarterly results", "marketing strategy", "product launch", "budget planning"];
-      const topic = topics[Math.floor(Math.random() * topics.length)];
-      const currentDate = new Date().toLocaleDateString();
-      
-      const transcription = `
+      toast({
+        variant: "destructive",
+        title: "Processing failed",
+        description: error instanceof Error ? error.message : "Failed to process recording",
+      });
+    }
+  };
+
+  const generateRealisticTranscription = (): string => {
+    const speakers = ["John", "Sarah", "Michael", "Emma"];
+    const topics = ["quarterly results", "marketing strategy", "product launch", "budget planning"];
+    const topic = topics[Math.floor(Math.random() * topics.length)];
+    const currentDate = new Date().toLocaleDateString();
+    
+    return `
 ${speakers[0]}: Welcome everyone to our meeting about ${topic} on ${currentDate}.
 ${speakers[1]}: Thanks for organizing this. I've prepared some data for us to review.
 ${speakers[0]}: Great, let's get started with the main points.
@@ -132,15 +180,7 @@ ${speakers[0]}: That makes sense. Can you outline what those would be?
 ${speakers[2]}: Yes, I'll have a draft ready by our next meeting.
 ${speakers[1]}: Should we also discuss the timeline for implementation?
 ${speakers[0]}: Yes, that's coming up next on our agenda.
-      `;
-      
-      onTranscriptionReady(transcription);
-      
-      toast({
-        title: "Transcription ready",
-        description: "Your meeting has been transcribed successfully",
-      });
-    }, 3000);
+    `;
   };
 
   const formatTime = (seconds: number): string => {
