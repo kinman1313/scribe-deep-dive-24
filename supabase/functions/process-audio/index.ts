@@ -62,6 +62,9 @@ serve(async (req) => {
       )
     }
     
+    // Print the Supabase URL to debug
+    console.log('Using Supabase URL:', supabaseUrl);
+    
     const supabaseClient = createClient(
       supabaseUrl,
       supabaseAnonKey,
@@ -91,6 +94,7 @@ serve(async (req) => {
     let requestData;
     try {
       requestData = await req.json();
+      console.log('Request data successfully parsed:', JSON.stringify(requestData, null, 2));
     } catch (error) {
       console.error('Error parsing request JSON:', error);
       return new Response(
@@ -132,7 +136,22 @@ serve(async (req) => {
     // 1. Download the audio file from the URL
     let audioResponse;
     try {
+      // For debugging, let's verify we can access the bucket and list files
+      const { data: storageData, error: storageError } = await supabaseClient.storage
+        .from('audio-recordings')
+        .list(userId);
+        
+      if (storageError) {
+        console.error('Error listing bucket contents:', storageError);
+      } else {
+        console.log('Found files in bucket:', storageData.map(f => f.name).join(', '));
+      }
+      
       audioResponse = await fetch(audioUrl);
+      
+      // Debug the response status
+      console.log('Fetch response status:', audioResponse.status, audioResponse.statusText);
+      console.log('Response headers:', JSON.stringify(Object.fromEntries(audioResponse.headers.entries()), null, 2));
     } catch (error) {
       console.error('Fetch error:', error);
       return new Response(
@@ -167,6 +186,7 @@ serve(async (req) => {
     let audioBlob;
     try {
       audioBlob = await audioResponse.blob();
+      console.log('Audio blob created successfully. Size:', audioBlob.size, 'Type:', audioBlob.type);
     } catch (error) {
       console.error('Blob conversion error:', error);
       return new Response(
@@ -188,8 +208,6 @@ serve(async (req) => {
       )
     }
     
-    console.log('Audio blob created successfully. Size:', audioBlob.size, 'Type:', audioBlob.type);
-    
     // 3. Create a FormData object for the OpenAI API
     const formData = new FormData()
     formData.append('file', audioBlob, fileName)
@@ -201,6 +219,8 @@ serve(async (req) => {
     // 4. Call the OpenAI API for transcription
     let transcriptionResponse;
     try {
+      console.log('Sending request to OpenAI API with API key starting with:', openAIApiKey.substring(0, 3) + '...');
+      
       transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
@@ -208,6 +228,8 @@ serve(async (req) => {
         },
         body: formData
       });
+      
+      console.log('OpenAI API response status:', transcriptionResponse.status);
     } catch (error) {
       console.error('OpenAI API fetch error:', error);
       return new Response(
