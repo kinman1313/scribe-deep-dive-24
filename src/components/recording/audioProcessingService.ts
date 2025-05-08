@@ -1,11 +1,10 @@
 
 import { toast } from '@/components/ui/use-toast';
-import { TranscriptionResult } from './types';
-import { AudioService } from '@/services/AudioService';
 import { generateRealisticTranscription } from './utils';
 
 /**
- * Process a recording by uploading it to Supabase storage and sending it to the Edge Function
+ * Process a recording by generating a realistic transcription
+ * This is a temporary solution until the Edge Function is fixed
  */
 export async function processRecording(
   audioBlob: Blob,
@@ -13,42 +12,40 @@ export async function processRecording(
   onComplete: (text: string) => void,
   onError: () => void
 ) {
-  // Show initial toast
-  toast({
-    title: "Transcribing audio",
-    description: "Please wait while we analyze your meeting...",
-  });
-  
   try {
-    // Use the AudioService to process the recording
-    await AudioService.processRecording(
-      audioBlob, 
-      userId, 
-      (transcription) => {
-        onComplete(transcription);
-        
-        toast({
-          title: "Transcription ready",
-          description: "Your meeting has been transcribed successfully",
-        });
-      },
-      onError
-    );
+    // Show processing toast
+    toast({
+      title: "Processing audio",
+      description: "Using demo data while we fix our transcription service...",
+    });
+    
+    console.log("Audio processing temporarily disabled. Using demo data instead.");
+    console.log("Original audio size:", (audioBlob.size / (1024 * 1024)).toFixed(2) + "MB");
+    
+    // Generate demo transcription
+    const demoTranscription = generateRealisticTranscription();
+    
+    // Short delay to simulate processing
+    setTimeout(() => {
+      onComplete(demoTranscription);
+      
+      toast({
+        title: "Demo data ready",
+        description: "Using simulated transcription until our service is back online.",
+      });
+    }, 2000);
+    
   } catch (error) {
     console.error('Error in processRecording:', error);
     
-    // Show appropriate error message
-    const errorMessage = error instanceof Error 
-      ? error.message 
-      : "Unknown error occurred. Using demo data instead.";
-    
+    // Show error message
     toast({
       variant: "destructive",
-      title: "Processing failed",
-      description: errorMessage,
+      title: "Processing error",
+      description: "We encountered an issue, but we're showing you demo data instead.",
     });
     
-    // Fallback to demo data
+    // Use demo data as fallback
     const demoTranscription = generateRealisticTranscription();
     onComplete(demoTranscription);
     onError();

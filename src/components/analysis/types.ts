@@ -15,3 +15,12 @@ export interface TodoItem {
   assignee: string;
   completed: boolean;
 }
+
+export interface MockTranscriptionData {
+  transcription: string;
+  speakers: Speaker[];
+  summary: string;
+  actionItems: ActionItem[];
+  todoList: TodoItem[];
+  insights: string;
+}
