@@ -45,27 +45,26 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 44100, // Standard CD-quality sample rate
-          // Adding audio constraints to help with compression
+          sampleRate: 44100,
           channelCount: 1, // Mono recording to reduce size
         } 
       });
       
-      // Try to use MP3 if supported, which has better compression, else use a compressed format OpenAI accepts
+      // Try to use compressed audio format if supported
       const mimeType = MediaRecorder.isTypeSupported('audio/mp3') 
         ? 'audio/mp3' 
         : MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-          ? 'audio/webm;codecs=opus'  // Opus codec typically has good compression
+          ? 'audio/webm;codecs=opus'
           : MediaRecorder.isTypeSupported('audio/m4a') 
             ? 'audio/m4a' 
-            : 'audio/webm'; // Fallback
+            : 'audio/webm';
       
       console.log(`Using MIME type: ${mimeType} for recording with compression`);
       
       // Configure recorder with lower bitrate for compression
       const options: MediaRecorderOptions = {
         mimeType: mimeType,
-        audioBitsPerSecond: 64000, // 64kbps bitrate for compression (adjust as needed)
+        audioBitsPerSecond: 64000, // 64kbps bitrate for compression
       };
       
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -82,7 +81,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             toast({
               title: "Recording size warning",
               description: `Recording is approaching the 25MB limit (${newEstimatedSize.toFixed(1)}MB)`,
-              variant: "default"  // Changed from "warning" to "default"
+              variant: "default"
             });
           } else if (newEstimatedSize >= MAX_SIZE_MB) {
             // Auto-stop if exceeding limit
