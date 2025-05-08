@@ -86,11 +86,8 @@ function prepareAudioForAPI(audioBlob: Blob): Promise<{ blob: Blob, extension: s
     if (fileSizeMB > MAX_FILE_SIZE_MB * 0.9) {
       console.log(`File size (${fileSizeMB.toFixed(2)}MB) is approaching OpenAI's ${MAX_FILE_SIZE_MB}MB limit. Additional compression may be applied.`);
       
-      // We could apply additional compression here if needed
-      // For now, we're relying on the MediaRecorder settings in RecordingInterface.tsx
-      // But we log a warning for monitoring
       toast({
-        variant: "default",  // Changed from "warning" to "default"
+        variant: "default",
         title: "Large audio file",
         description: `Audio is ${fileSizeMB.toFixed(1)}MB (OpenAI limit: ${MAX_FILE_SIZE_MB}MB). Processing may take longer.`,
       });
@@ -169,21 +166,12 @@ export async function processRecording(
     });
     
     try {
-      // Add a timeout promise to detect if the edge function takes too long
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Edge function timeout after 30 seconds')), 30000);
+      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
+        audioUrl,
+        fileName,
+        userId,
+        fileSize: audioFile.size
       });
-      
-      // Race the edge function call against the timeout
-      const result = await Promise.race([
-        invokeEdgeFunction<TranscriptionResult>('process-audio', {
-          audioUrl,
-          fileName,
-          userId,
-          fileSize: audioFile.size
-        }),
-        timeoutPromise
-      ]) as TranscriptionResult;
       
       console.log('Edge function response:', result);
       
@@ -210,44 +198,19 @@ export async function processRecording(
         throw new Error('The transcription service timed out. Please try again with a shorter recording');
       }
       
-      if (error?.status === 401 || error?.statusCode === 401) {
-        throw new Error('Authentication error (401): Your session has expired. Please sign out and back in');
-      }
-      
-      if (error?.status === 403 || error?.statusCode === 403) {
-        throw new Error('Permission error (403): You do not have permission to access this resource');
-      }
-      
-      if (error?.status === 413 || error?.statusCode === 413) {
-        throw new Error('File too large (413): Please record a shorter meeting');
-      }
-      
-      if (error?.status >= 500 || error?.statusCode >= 500) {
-        throw new Error(`Server error (${error?.status || error?.statusCode || 500}): The transcription service is currently unavailable`);
-      }
-      
-      // Detailed logging for troubleshooting edge function issues
-      if (error && typeof error === 'object') {
-        console.error('Error details:', JSON.stringify(error, null, 2));
-        
-        // Extract network status if available
-        if ('status' in error) {
-          console.error(`HTTP Status: ${error.status}`);
-        }
-        
-        if ('error' in error) {
-          const errorDetails = error.error;
-          console.error('Error response:', errorDetails);
-          
-          if (typeof errorDetails === 'object' && errorDetails && 'message' in errorDetails) {
-            throw new Error(`Transcription error: ${errorDetails.message}`);
-          } else if (typeof errorDetails === 'string') {
-            throw new Error(`Transcription error: ${errorDetails}`);
-          }
+      // Extract more detailed error info if available
+      let errorMessage = 'Transcription failed';
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error;
+        } else if ('error' in error && typeof error.error === 'object' && error.error && 'message' in error.error) {
+          errorMessage = error.error.message;
         }
       }
       
-      throw new Error(`Process-audio function failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Transcription error: ${errorMessage}`);
     }
   } catch (error) {
     console.error('Error processing recording:', error);

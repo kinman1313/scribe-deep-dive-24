@@ -44,7 +44,8 @@ export const checkAuthSession = async (): Promise<boolean> => {
     console.log("Auth session check:", { 
       hasSession: !!session, 
       isValid,
-      expiresAt: session ? new Date(session.expires_at * 1000).toISOString() : 'none' 
+      expiresAt: session ? new Date(session.expires_at * 1000).toISOString() : 'none',
+      userId: session?.user?.id || 'not authenticated'
     });
     
     return isValid;
@@ -65,45 +66,85 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     // Check auth session before calling the edge function
     const isSessionValid = await checkAuthSession();
     if (!isSessionValid) {
+      const errorMsg = "Authentication session is invalid or expired";
+      console.error(errorMsg);
       toast({
         variant: "destructive",
         title: "Authentication Error",
         description: "Your session has expired. Please sign in again."
       });
-      throw new Error("Authentication session is invalid or expired");
+      throw new Error(errorMsg);
     }
     
-    console.log(`Invoking edge function ${functionName} with:`, payload);
-    
-    const { data, error } = await supabase.functions.invoke<T>(functionName, {
-      body: payload
+    // Get fresh auth session to include in the invocation
+    const { data: authData } = await supabase.auth.getSession();
+    console.log(`Invoking edge function ${functionName} with:`, {
+      ...payload,
+      sessionInfo: {
+        userId: authData?.session?.user?.id,
+        hasSession: !!authData?.session,
+        expiresAt: authData?.session ? new Date(authData.session.expires_at * 1000).toISOString() : 'none'
+      }
     });
     
-    if (error) {
-      console.error(`Error invoking ${functionName}:`, error);
+    // Send the request with a timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const { data, error } = await supabase.functions.invoke<T>(functionName, {
+        body: payload
+      });
       
-      // Enhanced error logging
-      if (typeof error === 'object' && error !== null) {
-        console.error('Error details:', JSON.stringify(error, null, 2));
+      clearTimeout(timeoutId);
+      
+      if (error) {
+        console.error(`Error invoking ${functionName}:`, error);
         
-        if ('message' in error) {
-          console.error('Error message:', (error as any).message);
+        // Enhanced error logging
+        if (typeof error === 'object' && error !== null) {
+          console.error('Edge Function Error Details:', JSON.stringify(error, null, 2));
+          
+          if ('message' in error) {
+            console.error('Error message:', (error as any).message);
+          }
+          
+          if ('status' in error) {
+            console.error('Status code:', (error as any).status);
+          }
+          
+          if ('data' in error) {
+            console.error('Error data:', (error as any).data);
+          }
+          
+          // Extract user-friendly error message if possible
+          let errorMessage = `Error calling ${functionName}`;
+          if ('message' in error && typeof (error as any).message === 'string') {
+            errorMessage = (error as any).message;
+          } else if ('error' in error && typeof (error as any).error === 'string') {
+            errorMessage = (error as any).error;
+          } else if ('error' in error && typeof (error as any).error === 'object' && (error as any).error && 'message' in (error as any).error) {
+            errorMessage = (error as any).error.message;
+          }
+          
+          toast({
+            variant: "destructive",
+            title: "Edge Function Error",
+            description: errorMessage
+          });
         }
         
-        if ('status' in error) {
-          console.error('Status code:', (error as any).status);
-        }
-        
-        if ('data' in error) {
-          console.error('Error data:', (error as any).data);
-        }
+        throw error;
       }
       
-      throw error;
+      console.log(`Edge function ${functionName} response:`, data);
+      return data;
+    } catch (abortError) {
+      if (abortError.name === 'AbortError') {
+        throw new Error(`Edge function ${functionName} timed out after 30 seconds`);
+      }
+      throw abortError;
     }
-    
-    console.log(`Edge function ${functionName} response:`, data);
-    return data;
   } catch (error) {
     console.error(`Exception invoking ${functionName}:`, error);
     
@@ -133,6 +174,33 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     
     // Log detailed error info
     console.error(`Edge function error details: message=${errorMessage}, status=${statusCode}`);
+    
+    // Show a more user-friendly message based on status code
+    if (statusCode === 401 || statusCode === 403) {
+      toast({
+        variant: "destructive",
+        title: "Authentication Error", 
+        description: "Please sign out and sign back in to refresh your session"
+      });
+    } else if (statusCode === 413) {
+      toast({
+        variant: "destructive",
+        title: "File Too Large",
+        description: "Your recording is too large. Please try a shorter recording."
+      });
+    } else if (statusCode >= 500) {
+      toast({
+        variant: "destructive",
+        title: "Server Error",
+        description: "The server encountered an error. Please try again later."
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: errorMessage
+      });
+    }
     
     throw error;
   }
