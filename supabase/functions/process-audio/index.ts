@@ -304,11 +304,16 @@ serve(async (req) => {
     // 3. Create a FormData object for the OpenAI API
     const formData = new FormData();
     formData.append('file', audioBlob, finalFileName);
-    formData.append('model', 'whisper-1');
+    
+    // Use the newer gpt-4o-mini-transcribe model instead of whisper-1 for better quality
+    formData.append('model', 'gpt-4o-mini-transcribe');
     formData.append('language', 'en');
     formData.append('response_format', 'json');
     
-    console.log('Calling OpenAI transcription API');
+    // Add a descriptive prompt to help with transcription accuracy
+    formData.append('prompt', 'This is a recording of a business meeting or conversation.');
+    
+    console.log('Calling OpenAI transcription API with enhanced model: gpt-4o-mini-transcribe');
     console.log(`Sending ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB audio file named ${finalFileName}`);
     
     // 4. Call the OpenAI API for transcription
@@ -359,7 +364,7 @@ serve(async (req) => {
       )
     }
     
-    console.log('OpenAI transcription successful');
+    console.log('OpenAI transcription successful with enhanced model');
 
     // For debugging, report elapsed time
     console.log(`Transcription completed in ${Date.now() - requestStartTime}ms`);
