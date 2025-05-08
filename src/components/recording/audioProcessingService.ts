@@ -215,11 +215,31 @@ export async function processRecording(
   } catch (error) {
     console.error('Error processing recording:', error);
     
-    toast({
-      variant: "destructive",
-      title: "Processing failed",
-      description: error instanceof Error ? error.message : "Failed to process recording. Using demo data instead.",
-    });
+    // Add specific error handling for FunctionsHttpError
+    if (error instanceof Error) {
+      if ((error as any).name === 'FunctionsHttpError' || error.message.includes('FunctionsHttpError')) {
+        console.error('Detected FunctionsHttpError, additional details:', (error as any));
+        // Extract status code if available
+        const status = (error as any).status || (error as any).statusCode || '?';
+        toast({
+          variant: "destructive",
+          title: "Edge Function Error",
+          description: `Server returned error ${status}. Please try again later.`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Processing failed",
+          description: error.message || "Failed to process recording. Using demo data instead.",
+        });
+      }
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Processing failed",
+        description: "Unknown error occurred. Using demo data instead.",
+      });
+    }
     
     // Fallback to demo transcription
     const demoTranscription = generateRealisticTranscription();
