@@ -78,7 +78,7 @@ function prepareAudioForAPI(audioBlob: Blob): Promise<{ blob: Blob, extension: s
       // For now, we're relying on the MediaRecorder settings in RecordingInterface.tsx
       // But we log a warning for monitoring
       toast({
-        variant: "warning",
+        variant: "default",  // Changed from "warning" to "default"
         title: "Large audio file",
         description: `Audio is ${fileSizeMB.toFixed(1)}MB (OpenAI limit: ${MAX_FILE_SIZE_MB}MB). Processing may take longer.`,
       });

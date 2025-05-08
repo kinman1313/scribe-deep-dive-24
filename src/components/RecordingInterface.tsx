@@ -82,7 +82,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             toast({
               title: "Recording size warning",
               description: `Recording is approaching the 25MB limit (${newEstimatedSize.toFixed(1)}MB)`,
-              variant: "warning"
+              variant: "default"  // Changed from "warning" to "default"
             });
           } else if (newEstimatedSize >= MAX_SIZE_MB) {
             // Auto-stop if exceeding limit
