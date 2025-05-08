@@ -1,5 +1,5 @@
 
-import { supabase, invokeEdgeFunction } from '@/integrations/supabase/client';
+import { supabase, invokeEdgeFunction, checkAuthSession } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
 import { generateRealisticTranscription } from './utils';
@@ -17,6 +17,12 @@ async function uploadAudioToStorage(audioFile: File, userId: string, fileName: s
   
   console.log(`Uploading file to ${AUDIO_BUCKET_NAME}/${filePath}`);
   
+  // Check auth session before upload
+  const isSessionValid = await checkAuthSession();
+  if (!isSessionValid) {
+    throw new Error("Your session has expired. Please sign in again before uploading");
+  }
+  
   // Upload to Supabase Storage
   const { data: uploadData, error: uploadError } = await supabase.storage
     .from(AUDIO_BUCKET_NAME)
@@ -24,6 +30,12 @@ async function uploadAudioToStorage(audioFile: File, userId: string, fileName: s
     
   if (uploadError) {
     console.error('Upload error:', uploadError);
+    
+    // Provide more specific error messages based on the error code
+    if (uploadError.message.includes('storage.update_policy') || uploadError.message.includes('permission')) {
+      throw new Error(`Storage permission error: You don't have access to upload files. Please sign in again.`);
+    }
+    
     throw new Error(`Error uploading audio: ${uploadError.message}`);
   }
 
@@ -102,6 +114,12 @@ export async function processRecording(
       throw new Error("User not authenticated");
     }
 
+    // Check auth session first
+    const isSessionValid = await checkAuthSession();
+    if (!isSessionValid) {
+      throw new Error("Your session has expired. Please sign in again before processing recordings");
+    }
+
     console.log('Original audio blob type:', audioBlob.type, 'size:', (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB');
     
     // Check file size immediately
@@ -134,6 +152,14 @@ export async function processRecording(
     
     console.log('Audio URL:', audioUrl);
     
+    // Double-check auth status before calling edge function
+    const authStatus = await supabase.auth.getSession();
+    console.log('Auth status before edge function call:', {
+      hasSession: !!authStatus.data.session,
+      userId: authStatus.data.session?.user.id,
+      expiresAt: authStatus.data.session ? new Date(authStatus.data.session.expires_at * 1000).toISOString() : 'none'
+    });
+    
     // Call the Edge Function to process the audio
     console.log('Invoking edge function with payload:', {
       audioUrl,
@@ -143,14 +169,6 @@ export async function processRecording(
     });
     
     try {
-      // Add diagnostic information to help troubleshoot
-      const authStatus = await supabase.auth.getSession();
-      console.log('Auth status before edge function call:', {
-        hasSession: !!authStatus.data.session,
-        userId: authStatus.data.session?.user.id,
-        expiresAt: authStatus.data.session?.expires_at
-      });
-      
       // Add a timeout promise to detect if the edge function takes too long
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Edge function timeout after 30 seconds')), 30000);
@@ -183,6 +201,31 @@ export async function processRecording(
     } catch (error: any) {
       console.error('Edge function error:', error);
       
+      // Enhanced error messaging for common cases
+      if (error?.message?.includes('auth') || error?.message?.includes('Authentication')) {
+        throw new Error('Authentication error: Please sign out and back in to refresh your session');
+      }
+      
+      if (error?.message?.includes('timeout')) {
+        throw new Error('The transcription service timed out. Please try again with a shorter recording');
+      }
+      
+      if (error?.status === 401 || error?.statusCode === 401) {
+        throw new Error('Authentication error (401): Your session has expired. Please sign out and back in');
+      }
+      
+      if (error?.status === 403 || error?.statusCode === 403) {
+        throw new Error('Permission error (403): You do not have permission to access this resource');
+      }
+      
+      if (error?.status === 413 || error?.statusCode === 413) {
+        throw new Error('File too large (413): Please record a shorter meeting');
+      }
+      
+      if (error?.status >= 500 || error?.statusCode >= 500) {
+        throw new Error(`Server error (${error?.status || error?.statusCode || 500}): The transcription service is currently unavailable`);
+      }
+      
       // Detailed logging for troubleshooting edge function issues
       if (error && typeof error === 'object') {
         console.error('Error details:', JSON.stringify(error, null, 2));
@@ -202,11 +245,6 @@ export async function processRecording(
             throw new Error(`Transcription error: ${errorDetails}`);
           }
         }
-      }
-      
-      // If the error is related to authentication
-      if (error.message && error.message.includes('auth')) {
-        throw new Error('Authentication error: Please sign out and back in to refresh your session');
       }
       
       throw new Error(`Process-audio function failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
