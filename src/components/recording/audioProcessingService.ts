@@ -1,4 +1,3 @@
-
 import { supabase, invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
@@ -175,54 +174,17 @@ export async function processRecording(
     } catch (error: any) {
       console.error('Edge function error:', error);
       
-      // Attempt to extract more detailed error information
-      let errorMessage = "Unknown error";
-      let errorType = "unknown";
-      
-      if (error && typeof error === 'object') {
-        if ('message' in error) {
-          errorMessage = error.message;
-        }
-        if ('error' in error && typeof error.error === 'object' && error.error && 'message' in error.error) {
-          errorMessage = error.error.message;
-        }
-        if ('error' in error && typeof error.error === 'object' && error.error && 'errorType' in error.error) {
-          errorType = error.error.errorType;
+      // Handle the case where the error response has detailed error info
+      if (error && typeof error === 'object' && 'error' in error) {
+        const errorObj = error.error;
+        if (typeof errorObj === 'object' && errorObj && 'message' in errorObj) {
+          throw new Error(`Transcription error: ${errorObj.message}`);
+        } else if (typeof errorObj === 'string') {
+          throw new Error(`Transcription error: ${errorObj}`);
         }
       }
       
-      console.error('Error details:', { errorMessage, errorType });
-      
-      // Provide more specific error message based on the error type
-      let userFacingErrorMessage = "";
-      switch(errorType) {
-        case 'configuration':
-          userFacingErrorMessage = "Server configuration error. The OpenAI API key may be missing.";
-          break;
-        case 'auth':
-          userFacingErrorMessage = "Authentication failed. Please try logging out and back in.";
-          break;
-        case 'request':
-          userFacingErrorMessage = "Invalid request to the transcription service.";
-          break;
-        case 'network':
-        case 'storage':
-          userFacingErrorMessage = "Failed to access the audio file. Storage permissions might be incorrect.";
-          break;
-        case 'conversion':
-          userFacingErrorMessage = "Failed to process the audio file format.";
-          break;
-        case 'openai':
-          userFacingErrorMessage = "OpenAI service error. The audio format may be unsupported or the file may be too large.";
-          break;
-        case 'parsing':
-          userFacingErrorMessage = "Error processing the transcription response.";
-          break;
-        default:
-          userFacingErrorMessage = `Processing error: ${errorMessage}`;
-      }
-      
-      throw new Error(`Process-audio function failed: ${userFacingErrorMessage}`);
+      throw new Error(`Process-audio function failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   } catch (error) {
     console.error('Error processing recording:', error);

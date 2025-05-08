@@ -363,7 +363,7 @@ serve(async (req) => {
     formData.append('response_format', 'json');
     
     // Add a descriptive prompt to help with transcription accuracy
-    formData.append('prompt', 'This is a recording of a business meeting or conversation.');
+    formData.append('prompt', 'This is a recording of a business meeting or conversation. Please transcribe it accurately.');
     
     console.log('Calling OpenAI transcription API with model: whisper-1');
     console.log(`Sending ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB audio file named ${finalFileName}`);
@@ -401,13 +401,19 @@ serve(async (req) => {
       
       // Log more details about the response
       if (!transcriptionResponse.ok) {
-        const responseText = await transcriptionResponse.text();
-        console.error(`OpenAI API error ${transcriptionResponse.status}: ${responseText}`);
+        let errorText = '';
+        try {
+          errorText = await transcriptionResponse.text();
+        } catch (e) {
+          errorText = 'Could not extract error text';
+        }
+        
+        console.error(`OpenAI API error ${transcriptionResponse.status}: ${errorText}`);
         
         clearTimeout(functionTimeout);
         return new Response(
           JSON.stringify({
-            error: `OpenAI API error (${transcriptionResponse.status}): ${responseText}`,
+            error: `OpenAI API error (${transcriptionResponse.status}): ${errorText}`,
             errorType: 'openai',
             model: 'whisper-1',
             audioType: audioBlob.type,
