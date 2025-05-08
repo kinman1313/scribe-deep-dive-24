@@ -36,11 +36,27 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
     setUseDemoData(false);
     
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100, // Standard CD-quality sample rate
+        } 
+      });
       
-      // Specify audio format explicitly
+      // Try to use MP3 if supported, else use one of the formats OpenAI accepts
+      const mimeType = MediaRecorder.isTypeSupported('audio/mp3') 
+        ? 'audio/mp3' 
+        : MediaRecorder.isTypeSupported('audio/m4a') 
+          ? 'audio/m4a' 
+          : MediaRecorder.isTypeSupported('audio/mpeg') 
+            ? 'audio/mpeg'
+            : 'audio/webm'; // Fallback to webm which is widely supported
+      
+      console.log(`Using MIME type: ${mimeType} for recording`);
+      
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm' // Use WebM which is widely supported
+        mimeType: mimeType
       });
       
       mediaRecorderRef.current.addEventListener('dataavailable', (event) => {
@@ -48,7 +64,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       });
       
       mediaRecorderRef.current.addEventListener('stop', () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
         

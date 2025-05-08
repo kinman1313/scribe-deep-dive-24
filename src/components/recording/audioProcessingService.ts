@@ -1,4 +1,3 @@
-
 import { supabase, invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
@@ -44,122 +43,32 @@ async function uploadAudioToStorage(audioFile: File, userId: string, fileName: s
 /**
  * Convert the audioBlob to proper format for OpenAI API
  * OpenAI supports MP3, MP4, MPEG, MPGA, M4A, WAV, and WEBM
- * We'll convert to MP3 which is widely supported
  */
-function ensureProperAudioFormat(audioBlob: Blob): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    // Create an audio context
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    const audioContext = new AudioContext();
+function prepareAudioForAPI(audioBlob: Blob): Promise<{ blob: Blob, extension: string }> {
+  return new Promise((resolve) => {
+    // Get the current mime type
+    const mimeType = audioBlob.type || 'audio/webm';
+    console.log('Original audio mime type:', mimeType);
     
-    // Create a file reader to read the blob
-    const fileReader = new FileReader();
-    
-    fileReader.onload = async () => {
-      try {
-        // Decode the audio data
-        const arrayBuffer = fileReader.result as ArrayBuffer;
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        // Create an offline audio context to render the audio
-        const offlineAudioContext = new OfflineAudioContext(
-          audioBuffer.numberOfChannels,
-          audioBuffer.length,
-          audioBuffer.sampleRate
-        );
-        
-        // Create a buffer source
-        const source = offlineAudioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(offlineAudioContext.destination);
-        source.start();
-        
-        // Render the audio
-        const renderedBuffer = await offlineAudioContext.startRendering();
-        
-        // Convert the buffer to wav format
-        const wavBlob = bufferToWav(renderedBuffer);
-        
-        console.log('Audio successfully converted to WAV format, size:', wavBlob.size);
-        resolve(wavBlob);
-      } catch (error) {
-        console.error('Error converting audio format:', error);
-        reject(error);
-      }
-    };
-    
-    fileReader.onerror = (error) => {
-      console.error('FileReader error:', error);
-      reject(error);
-    };
-    
-    // Read the blob as an array buffer
-    fileReader.readAsArrayBuffer(audioBlob);
-  });
-}
-
-/**
- * Convert an AudioBuffer to a WAV Blob
- * This function creates a proper WAV file that OpenAI can process
- */
-function bufferToWav(buffer: AudioBuffer): Blob {
-  const numberOfChannels = buffer.numberOfChannels;
-  const length = buffer.length * numberOfChannels * 2; // 2 bytes per sample (16-bit)
-  const sampleRate = buffer.sampleRate;
-  
-  // Create a buffer for the WAV file
-  const arrayBuffer = new ArrayBuffer(44 + length);
-  const view = new DataView(arrayBuffer);
-  
-  // Write WAV header
-  // "RIFF" chunk descriptor
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + length, true);
-  writeString(view, 8, 'WAVE');
-  
-  // "fmt " sub-chunk
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // 16 bytes for PCM format
-  view.setUint16(20, 1, true); // PCM format (1)
-  view.setUint16(22, numberOfChannels, true); // Number of channels
-  view.setUint32(24, sampleRate, true); // Sample rate
-  view.setUint32(28, sampleRate * numberOfChannels * 2, true); // Byte rate
-  view.setUint16(32, numberOfChannels * 2, true); // Block align
-  view.setUint16(34, 16, true); // Bits per sample
-  
-  // "data" sub-chunk
-  writeString(view, 36, 'data');
-  view.setUint32(40, length, true);
-  
-  // Write actual audio data
-  const offset = 44;
-  let index = 0;
-  
-  // Interleave channels
-  for (let i = 0; i < buffer.length; i++) {
-    for (let channel = 0; channel < numberOfChannels; channel++) {
-      // Get the sample from the channel data
-      const sample = buffer.getChannelData(channel)[i];
-      
-      // Convert float to 16-bit signed integer
-      const sample16bit = Math.max(-1, Math.min(1, sample)) * 0x7FFF;
-      
-      // Write the 16-bit sample
-      view.setInt16(offset + index, sample16bit, true);
-      index += 2; // 2 bytes per sample
+    // Determine the appropriate extension based on mime type
+    let extension = '.mp3'; // Default
+    if (mimeType.includes('webm')) {
+      extension = '.webm';
+    } else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
+      extension = '.mp3';
+    } else if (mimeType.includes('m4a')) {
+      extension = '.m4a';
+    } else if (mimeType.includes('wav')) {
+      extension = '.wav';
+    } else if (mimeType.includes('mp4')) {
+      extension = '.mp4';
     }
-  }
-  
-  return new Blob([view], { type: 'audio/wav' });
-}
-
-/**
- * Helper function to write strings to a DataView
- */
-function writeString(view: DataView, offset: number, string: string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
+    
+    console.log(`Using extension ${extension} based on mime type ${mimeType}`);
+    
+    // Just use the blob as is - OpenAI can handle these formats directly
+    resolve({ blob: audioBlob, extension });
+  });
 }
 
 export async function processRecording(
@@ -177,22 +86,16 @@ export async function processRecording(
 
     console.log('Original audio blob type:', audioBlob.type, 'size:', audioBlob.size);
     
-    // Convert the audio to proper WAV format for OpenAI
-    let processedAudioBlob;
-    try {
-      processedAudioBlob = await ensureProperAudioFormat(audioBlob);
-      console.log('Processed audio blob type:', processedAudioBlob.type, 'size:', processedAudioBlob.size);
-    } catch (error) {
-      console.error('Error processing audio format:', error);
-      throw new Error(`Failed to process audio format: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // Prepare the audio for the API
+    const { blob: processedAudioBlob, extension } = await prepareAudioForAPI(audioBlob);
+    console.log('Processed audio blob type:', processedAudioBlob.type, 'size:', processedAudioBlob.size);
 
-    // Generate a simple file name based on timestamp - avoiding special characters
+    // Generate a simple file name based on timestamp with the appropriate extension
     const timestamp = Date.now();
-    const fileName = `audio_${timestamp}.wav`;
+    const fileName = `recording_${timestamp}${extension}`;
     
-    // Create a File from the processed Blob
-    const audioFile = new File([processedAudioBlob], fileName, { type: 'audio/wav' });
+    // Create a File from the processed Blob with the correct extension
+    const audioFile = new File([processedAudioBlob], fileName, { type: processedAudioBlob.type });
     
     console.log('File created:', fileName, 'Size:', audioFile.size, 'Type:', audioFile.type);
     

@@ -165,8 +165,10 @@ serve(async (req) => {
 
     // Try to download the file directly using Supabase storage
     let audioBlob;
+    let downloadMethod = "";
     try {
       // First attempt to download using Supabase storage API
+      downloadMethod = "supabase.storage.download";
       const { data: fileData, error: fileError } = await supabaseClient.storage
         .from('audio-recordings')
         .download(`${userId}/${fileName}`);
@@ -188,6 +190,7 @@ serve(async (req) => {
       // Fall back to the public URL if direct download fails
       try {
         // 1. Download the audio file from the URL
+        downloadMethod = "direct URL fetch";
         const audioResponse = await fetch(audioUrl);
         
         if (!audioResponse.ok) {
@@ -233,6 +236,11 @@ serve(async (req) => {
     
     // Verify the audio blob type
     console.log(`Audio blob details - Size: ${audioBlob.size} bytes, Type: ${audioBlob.type || 'unknown'}`);
+    console.log(`Downloaded using method: ${downloadMethod}`);
+    
+    // Get file extension from filename
+    const fileExtension = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.')).toLowerCase() : '';
+    console.log(`File extension from filename: '${fileExtension}'`);
     
     // For debugging, report elapsed time
     console.log(`Audio retrieval completed in ${Date.now() - requestStartTime}ms`);
@@ -240,10 +248,22 @@ serve(async (req) => {
     // Ensure we have the correct file extension for OpenAI
     // OpenAI supports MP3, MP4, MPEG, MPGA, M4A, WAV, and WEBM
     let finalFileName = fileName;
-    if (!finalFileName.endsWith('.wav') && !finalFileName.endsWith('.mp3') && 
-        !finalFileName.endsWith('.mp4') && !finalFileName.endsWith('.webm') && 
-        !finalFileName.endsWith('.m4a')) {
-      finalFileName += '.wav'; // Default to WAV extension
+    
+    // If the audio blob has a type, use that to determine the extension
+    if (audioBlob.type && audioBlob.type !== '') {
+      if (audioBlob.type.includes('mp3')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.mp3';
+      } else if (audioBlob.type.includes('mp4')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.mp4';
+      } else if (audioBlob.type.includes('mpeg')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.mpga'; // OpenAI uses mpga extension
+      } else if (audioBlob.type.includes('m4a')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.m4a';
+      } else if (audioBlob.type.includes('wav')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.wav';
+      } else if (audioBlob.type.includes('webm')) {
+        finalFileName = finalFileName.replace(/\.[^/.]+$/, '') + '.webm';
+      }
     }
     
     console.log('Using filename for OpenAI request:', finalFileName);
@@ -253,13 +273,14 @@ serve(async (req) => {
     formData.append('file', audioBlob, finalFileName);
     formData.append('model', 'whisper-1');
     formData.append('language', 'en');
+    formData.append('response_format', 'json');
     
     console.log('Calling OpenAI transcription API');
     
     // 4. Call the OpenAI API for transcription
     let transcriptionResponse;
     try {
-      console.log('Sending request to OpenAI API with API key starting with:', openAIApiKey.substring(0, 3) + '...');
+      console.log('Sending request to OpenAI API...');
       console.log('FormData contains file named:', finalFileName);
       
       transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -286,6 +307,7 @@ serve(async (req) => {
       let errorDetails = 'Unknown error';
       try {
         errorDetails = await transcriptionResponse?.text() || 'No error details available';
+        console.log('Raw error response from OpenAI:', errorDetails);
       } catch (e) {
         console.error('Error getting transcription error details:', e);
       }
@@ -311,6 +333,10 @@ serve(async (req) => {
     let transcriptionData;
     try {
       transcriptionData = await transcriptionResponse.json();
+      console.log('Transcription data preview:', 
+        transcriptionData?.text ? 
+        `First 50 chars: ${transcriptionData.text.substring(0, 50)}...` : 
+        'No text field found');
     } catch (error) {
       console.error('Error parsing transcription response:', error);
       return new Response(
@@ -326,7 +352,8 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Invalid or empty response from OpenAI API',
-          errorType: 'openai'
+          errorType: 'openai',
+          response: transcriptionData
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -334,41 +361,6 @@ serve(async (req) => {
     
     const transcription = transcriptionData.text;
     console.log('Transcription received, length:', transcription.length);
-    
-    // For short transcriptions, return immediately without additional processing
-    if (transcription.length < 50) {
-      console.log('Transcription is very short, skipping analysis');
-      
-      // 6. Store the results in the database
-      try {
-        const { error: dbError } = await supabaseClient
-          .from('transcriptions')
-          .insert({
-            user_id: userId,
-            title: `Meeting on ${new Date().toLocaleDateString()}`,
-            content: transcription
-          });
-    
-        if (dbError) {
-          console.error('Database error:', dbError);
-        }
-      } catch (dbError) {
-        console.error('Exception during database insert:', dbError);
-      }
-      
-      const result: TranscriptionResult = {
-        transcription
-      };
-      
-      return new Response(
-        JSON.stringify(result),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-    
-    // Here, use a simpler analysis for now to reduce complexity
-    // Skip GPT analysis to simplify the process temporarily
-    console.log('Skipping detailed analysis for now');
     
     // Store the results directly
     try {
@@ -391,7 +383,7 @@ serve(async (req) => {
       // Continue anyway to return the transcription
     }
 
-    // Return just the transcription without additional processing
+    // Return just the transcription
     const result: TranscriptionResult = {
       transcription
     };
