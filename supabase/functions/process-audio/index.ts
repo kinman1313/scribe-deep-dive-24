@@ -305,15 +305,15 @@ serve(async (req) => {
     const formData = new FormData();
     formData.append('file', audioBlob, finalFileName);
     
-    // Use the newer gpt-4o-mini-transcribe model instead of whisper-1 for better quality
-    formData.append('model', 'gpt-4o-mini-transcribe');
+    // Try using the older whisper-1 model instead of gpt-4o-mini-transcribe which might have issues
+    formData.append('model', 'whisper-1');
     formData.append('language', 'en');
     formData.append('response_format', 'json');
     
     // Add a descriptive prompt to help with transcription accuracy
     formData.append('prompt', 'This is a recording of a business meeting or conversation.');
     
-    console.log('Calling OpenAI transcription API with enhanced model: gpt-4o-mini-transcribe');
+    console.log('Calling OpenAI transcription API with model: whisper-1');
     console.log(`Sending ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB audio file named ${finalFileName}`);
     
     // 4. Call the OpenAI API for transcription
@@ -331,12 +331,30 @@ serve(async (req) => {
       });
       
       console.log('OpenAI API response status:', transcriptionResponse.status);
+      
+      // Log more details about the response
+      if (!transcriptionResponse.ok) {
+        const responseText = await transcriptionResponse.text();
+        console.error(`OpenAI API error ${transcriptionResponse.status}: ${responseText}`);
+        
+        return new Response(
+          JSON.stringify({
+            error: `OpenAI API error (${transcriptionResponse.status}): ${responseText}`,
+            errorType: 'openai',
+            model: 'whisper-1',
+            audioType: audioBlob.type,
+            audioSize: `${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB`
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     } catch (error) {
       console.error('OpenAI API fetch error:', error);
       return new Response(
         JSON.stringify({ 
           error: `OpenAI API request failed: ${error instanceof Error ? error.message : 'Network error'}`,
-          errorType: 'openai'
+          errorType: 'openai',
+          model: 'whisper-1'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -358,13 +376,14 @@ serve(async (req) => {
         JSON.stringify({ 
           error: `OpenAI API error: ${errorDetails}`, 
           status: transcriptionResponse?.status,
-          errorType: 'openai'
+          errorType: 'openai',
+          model: 'whisper-1'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
     
-    console.log('OpenAI transcription successful with enhanced model');
+    console.log('OpenAI transcription successful with whisper-1 model');
 
     // For debugging, report elapsed time
     console.log(`Transcription completed in ${Date.now() - requestStartTime}ms`);
