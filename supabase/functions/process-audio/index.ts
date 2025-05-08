@@ -181,7 +181,7 @@ serve(async (req) => {
       }
       
       audioBlob = fileData;
-      console.log('Successfully downloaded file from Supabase Storage, size:', audioBlob.size);
+      console.log('Successfully downloaded file from Supabase Storage, size:', audioBlob.size, 'type:', audioBlob.type);
     } catch (storageError) {
       console.error('Supabase storage download failed, falling back to URL fetch:', storageError);
       
@@ -231,14 +231,28 @@ serve(async (req) => {
       )
     }
     
+    // Verify the audio blob type
+    console.log(`Audio blob details - Size: ${audioBlob.size} bytes, Type: ${audioBlob.type || 'unknown'}`);
+    
     // For debugging, report elapsed time
     console.log(`Audio retrieval completed in ${Date.now() - requestStartTime}ms`);
     
+    // Ensure we have the correct file extension for OpenAI
+    // OpenAI supports MP3, MP4, MPEG, MPGA, M4A, WAV, and WEBM
+    let finalFileName = fileName;
+    if (!finalFileName.endsWith('.wav') && !finalFileName.endsWith('.mp3') && 
+        !finalFileName.endsWith('.mp4') && !finalFileName.endsWith('.webm') && 
+        !finalFileName.endsWith('.m4a')) {
+      finalFileName += '.wav'; // Default to WAV extension
+    }
+    
+    console.log('Using filename for OpenAI request:', finalFileName);
+    
     // 3. Create a FormData object for the OpenAI API
-    const formData = new FormData()
-    formData.append('file', audioBlob, fileName)
-    formData.append('model', 'whisper-1')
-    formData.append('language', 'en')
+    const formData = new FormData();
+    formData.append('file', audioBlob, finalFileName);
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'en');
     
     console.log('Calling OpenAI transcription API');
     
@@ -246,6 +260,7 @@ serve(async (req) => {
     let transcriptionResponse;
     try {
       console.log('Sending request to OpenAI API with API key starting with:', openAIApiKey.substring(0, 3) + '...');
+      console.log('FormData contains file named:', finalFileName);
       
       transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',

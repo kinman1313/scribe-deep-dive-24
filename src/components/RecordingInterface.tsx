@@ -38,16 +38,21 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      // Specify audio format explicitly
+      mediaRecorderRef.current = new MediaRecorder(stream, {
+        mimeType: 'audio/webm' // Use WebM which is widely supported
+      });
       
       mediaRecorderRef.current.addEventListener('dataavailable', (event) => {
         audioChunksRef.current.push(event.data);
       });
       
       mediaRecorderRef.current.addEventListener('stop', () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
+        
+        console.log('Recording stopped. Audio blob:', audioBlob.type, 'size:', audioBlob.size);
         
         // Process the recording using the real transcription service
         if (user) {
@@ -61,7 +66,8 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         }
       });
       
-      mediaRecorderRef.current.start();
+      // Start recording with a 1-second timeslice to get data more frequently
+      mediaRecorderRef.current.start(1000);
       setIsRecording(true);
       
       // Start timer
