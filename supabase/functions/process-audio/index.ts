@@ -33,6 +33,7 @@ serve(async (req) => {
   }
   
   console.log(`Edge function process-audio - received ${req.method} request`);
+  const requestStartTime = Date.now();
 
   try {
     // Check if OpenAI API key is available immediately
@@ -130,72 +131,94 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
+    
     console.log('Attempting to fetch audio file from URL:', audioUrl);
-
-    // 1. Download the audio file from the URL
-    let audioResponse;
+    
+    // First try to list bucket contents to verify access
     try {
-      // For debugging, let's verify we can access the bucket and list files
       const { data: storageData, error: storageError } = await supabaseClient.storage
         .from('audio-recordings')
         .list(userId);
         
       if (storageError) {
         console.error('Error listing bucket contents:', storageError);
-      } else {
-        console.log('Found files in bucket:', storageData.map(f => f.name).join(', '));
-      }
+        return new Response(
+          JSON.stringify({
+            error: `Failed to list bucket contents: ${storageError.message}`,
+            errorType: 'storage'
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } 
       
-      audioResponse = await fetch(audioUrl);
-      
-      // Debug the response status
-      console.log('Fetch response status:', audioResponse.status, audioResponse.statusText);
-      console.log('Response headers:', JSON.stringify(Object.fromEntries(audioResponse.headers.entries()), null, 2));
+      console.log('Successfully accessed bucket. Found files:', storageData.map(f => f.name).join(', '));
     } catch (error) {
-      console.error('Fetch error:', error);
+      console.error('Exception accessing bucket:', error);
       return new Response(
-        JSON.stringify({ 
-          error: `Failed to fetch audio file: ${error instanceof Error ? error.message : 'Network error'}`,
-          url: audioUrl,
-          errorType: 'network'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-    
-    if (!audioResponse || !audioResponse.ok) {
-      const status = audioResponse?.status || 'unknown';
-      const statusText = audioResponse?.statusText || 'unknown';
-      console.error(`Failed to fetch audio file. Status: ${status}, Status text: ${statusText}`);
-      
-      return new Response(
-        JSON.stringify({ 
-          error: `Failed to fetch audio file: ${statusText}`,
-          status: status,
-          url: audioUrl,
+        JSON.stringify({
+          error: `Exception accessing bucket: ${error instanceof Error ? error.message : 'Unknown error'}`,
           errorType: 'storage'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
 
-    console.log('Audio file fetched successfully');
-
-    // 2. Get audio data as blob
+    // Try to download the file directly using Supabase storage
     let audioBlob;
     try {
-      audioBlob = await audioResponse.blob();
-      console.log('Audio blob created successfully. Size:', audioBlob.size, 'Type:', audioBlob.type);
-    } catch (error) {
-      console.error('Blob conversion error:', error);
-      return new Response(
-        JSON.stringify({ 
-          error: `Failed to convert audio response to blob: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          errorType: 'conversion'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      // First attempt to download using Supabase storage API
+      const { data: fileData, error: fileError } = await supabaseClient.storage
+        .from('audio-recordings')
+        .download(`${userId}/${fileName}`);
+      
+      if (fileError) {
+        console.error('Error downloading from Supabase Storage:', fileError);
+        throw new Error(`Supabase storage download failed: ${fileError.message}`);
+      }
+      
+      if (!fileData) {
+        throw new Error('File download successful but returned null data');
+      }
+      
+      audioBlob = fileData;
+      console.log('Successfully downloaded file from Supabase Storage, size:', audioBlob.size);
+    } catch (storageError) {
+      console.error('Supabase storage download failed, falling back to URL fetch:', storageError);
+      
+      // Fall back to the public URL if direct download fails
+      try {
+        // 1. Download the audio file from the URL
+        const audioResponse = await fetch(audioUrl);
+        
+        if (!audioResponse.ok) {
+          const status = audioResponse.status;
+          const statusText = audioResponse.statusText;
+          console.error(`Failed to fetch audio file. Status: ${status}, Status text: ${statusText}`);
+          
+          return new Response(
+            JSON.stringify({ 
+              error: `Failed to fetch audio file: ${statusText}`,
+              status: status,
+              url: audioUrl,
+              errorType: 'storage'
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        // 2. Get audio data as blob
+        audioBlob = await audioResponse.blob();
+        console.log('Audio blob created via URL fetch. Size:', audioBlob.size, 'Type:', audioBlob.type);
+      } catch (fetchError) {
+        console.error('Both storage methods failed:', fetchError);
+        return new Response(
+          JSON.stringify({ 
+            error: `Failed to access audio file by any method: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`,
+            errorType: 'storage'
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
     
     if (!audioBlob || audioBlob.size === 0) {
@@ -208,11 +231,14 @@ serve(async (req) => {
       )
     }
     
+    // For debugging, report elapsed time
+    console.log(`Audio retrieval completed in ${Date.now() - requestStartTime}ms`);
+    
     // 3. Create a FormData object for the OpenAI API
     const formData = new FormData()
     formData.append('file', audioBlob, fileName)
     formData.append('model', 'whisper-1')
-    formData.append('language', 'en') // You can make this dynamic later
+    formData.append('language', 'en')
     
     console.log('Calling OpenAI transcription API');
     
@@ -261,8 +287,11 @@ serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
+    
     console.log('OpenAI transcription successful');
+
+    // For debugging, report elapsed time
+    console.log(`Transcription completed in ${Date.now() - requestStartTime}ms`);
 
     let transcriptionData;
     try {
@@ -322,80 +351,18 @@ serve(async (req) => {
       )
     }
     
-    // 5. Process the transcription with GPT to extract summary and action items
-    console.log('Calling OpenAI for analysis');
+    // Here, use a simpler analysis for now to reduce complexity
+    // Skip GPT analysis to simplify the process temporarily
+    console.log('Skipping detailed analysis for now');
     
-    let summary = '';
-    const actionItems: string[] = [];
-    
-    try {
-      const analysisResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openAIApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an AI assistant specializing in analyzing meeting transcripts. Extract a concise summary and list of action items from the provided meeting transcript.'
-            },
-            {
-              role: 'user',
-              content: `Please analyze this meeting transcript and provide: 
-              1. A concise summary (maximum 3 paragraphs)
-              2. A list of action items with assigned people where mentioned
-              
-              Transcript:
-              ${transcription}`
-            }
-          ],
-          temperature: 0.5,
-          max_tokens: 800
-        })
-      });
-  
-      if (!analysisResponse.ok) {
-        // Continue with just the transcription if analysis fails
-        console.error('Analysis API error:', await analysisResponse.text());
-      } else {
-        const analysisData = await analysisResponse.json();
-        const analysisText = analysisData.choices[0].message.content;
-        console.log('Analysis received, processing sections');
-    
-        // Extract summary and action items from the analysis
-        const sections = analysisText.split('\n\n');
-        for (const section of sections) {
-          if (section.toLowerCase().includes('summary')) {
-            summary = section.replace(/^summary:?/i, '').trim();
-          } else if (section.toLowerCase().includes('action item')) {
-            // Split into individual action items
-            const items = section.split('\n');
-            for (const item of items) {
-              if (item.trim() && !item.toLowerCase().includes('action item')) {
-                actionItems.push(item.trim());
-              }
-            }
-          }
-        }
-      }
-    } catch (analysisError) {
-      console.error('Error during analysis:', analysisError);
-      // Continue with just the transcription
-    }
-
-    // 6. Store the results in the database
+    // Store the results directly
     try {
       const { error: dbError } = await supabaseClient
         .from('transcriptions')
         .insert({
           user_id: userId,
           title: `Meeting on ${new Date().toLocaleDateString()}`,
-          content: transcription,
-          summary,
-          action_items: actionItems
+          content: transcription
         });
 
       if (dbError) {
@@ -409,14 +376,13 @@ serve(async (req) => {
       // Continue anyway to return the transcription
     }
 
-    // 7. Return the results
+    // Return just the transcription without additional processing
     const result: TranscriptionResult = {
-      transcription,
-      summary,
-      actionItems
+      transcription
     };
     
     console.log('Edge function completed successfully');
+    console.log(`Total execution time: ${Date.now() - requestStartTime}ms`);
 
     return new Response(
       JSON.stringify(result),

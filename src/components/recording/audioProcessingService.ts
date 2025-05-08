@@ -54,8 +54,9 @@ export async function processRecording(
       throw new Error("User not authenticated");
     }
 
-    // Generate a file name based on date and time
-    const fileName = `recording_${Date.now()}.wav`;
+    // Generate a file name based on timestamp with a reduced size - avoiding special characters
+    const timestamp = Date.now();
+    const fileName = `recording_${timestamp}.wav`;
     
     // Create a File from the Blob
     const audioFile = new File([audioBlob], fileName, { type: 'audio/wav' });
@@ -127,6 +128,8 @@ export async function processRecording(
           errorType = error.error.errorType;
         }
       }
+      
+      console.error('Error details:', { errorMessage, errorType });
       
       // Provide more specific error message based on the error type
       let userFacingErrorMessage = "";
