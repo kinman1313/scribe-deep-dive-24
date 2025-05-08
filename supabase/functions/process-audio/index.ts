@@ -28,9 +28,15 @@ interface TranscriptionResult {
 }
 
 serve(async (req) => {
+  // Set a timeout for the entire function to guard against hanging processes
+  const functionTimeout = setTimeout(() => {
+    console.error('Function execution timed out after 25 seconds');
+  }, 25000);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    clearTimeout(functionTimeout);
+    return new Response('ok', { headers: corsHeaders });
   }
   
   console.log(`Edge function process-audio - received ${req.method} request`);
@@ -40,13 +46,14 @@ serve(async (req) => {
     // Check if OpenAI API key is available immediately
     if (!openAIApiKey) {
       console.error('OpenAI API key is not configured');
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'OpenAI API key is not configured', 
           errorType: 'configuration' 
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     // Create a Supabase client with the Auth context of the function
@@ -55,13 +62,14 @@ serve(async (req) => {
     
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error('Supabase URL or anon key is not configured');
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Supabase configuration is missing', 
           errorType: 'configuration' 
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     // Print the Supabase URL to debug
@@ -75,7 +83,7 @@ serve(async (req) => {
           headers: { Authorization: req.headers.get('Authorization')! },
         },
       }
-    )
+    );
     
     console.log('Edge function started - Supabase client created');
     
@@ -83,39 +91,57 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       console.error('Missing Authorization header');
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Missing Authorization header', 
           errorType: 'auth' 
         }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
 
-    // Get the request payload
+    // Get the request payload with a timeout to prevent hanging
     let requestData;
     try {
-      requestData = await req.json();
+      // Use AbortController to timeout the request parsing if it takes too long
+      const parseTimeout = 5000; // 5 seconds timeout for parsing
+      const controller = new AbortController();
+      const parseTimer = setTimeout(() => controller.abort(), parseTimeout);
+      
+      try {
+        const responsePromise = req.json();
+        requestData = await responsePromise;
+        clearTimeout(parseTimer);
+      } catch (abortError) {
+        if (abortError.name === 'AbortError') {
+          throw new Error('Request parsing timed out after 5 seconds');
+        }
+        throw abortError;
+      }
+      
       console.log('Request data successfully parsed:', JSON.stringify(requestData, null, 2));
     } catch (error) {
       console.error('Error parsing request JSON:', error);
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Invalid JSON in request body', 
           errorType: 'request' 
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     if (!requestData) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Empty request body', 
           errorType: 'request' 
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     const { audioUrl, fileName, userId, fileSize } = requestData as RequestPayload;
@@ -128,6 +154,7 @@ serve(async (req) => {
     });
     
     if (!audioUrl || !fileName || !userId) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Missing required fields', 
@@ -135,18 +162,19 @@ serve(async (req) => {
           errorType: 'request'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     // Check file size if provided
     if (fileSize && fileSize > 25 * 1024 * 1024) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: `Audio file size (${(fileSize / (1024 * 1024)).toFixed(1)}MB) exceeds the OpenAI 25MB limit`,
           errorType: 'request'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     console.log('Attempting to fetch audio file from URL:', audioUrl);
@@ -159,6 +187,7 @@ serve(async (req) => {
         
       if (storageError) {
         console.error('Error listing bucket contents:', storageError);
+        clearTimeout(functionTimeout);
         return new Response(
           JSON.stringify({
             error: `Failed to list bucket contents: ${storageError.message}`,
@@ -171,6 +200,7 @@ serve(async (req) => {
       console.log('Successfully accessed bucket. Found files:', storageData.map(f => f.name).join(', '));
     } catch (error) {
       console.error('Exception accessing bucket:', error);
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({
           error: `Exception accessing bucket: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -179,6 +209,11 @@ serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Use a timeout for downloading the file
+    const downloadTimeout = 10000; // 10 second timeout
+    const downloadController = new AbortController();
+    const downloadTimer = setTimeout(() => downloadController.abort(), downloadTimeout);
 
     // Try to download the file directly using Supabase storage
     let audioBlob;
@@ -208,33 +243,48 @@ serve(async (req) => {
       
       // Fall back to the public URL if direct download fails
       try {
-        // Download the audio file from the URL
+        // Download the audio file from the URL with timeout
         downloadMethod = "direct URL fetch";
-        const audioResponse = await fetch(audioUrl);
         
-        if (!audioResponse.ok) {
-          const status = audioResponse.status;
-          const statusText = audioResponse.statusText;
-          console.error(`Failed to fetch audio file. Status: ${status}, Status text: ${statusText}`);
+        // Wrap the fetch in a Promise.race with our abort controller
+        try {
+          const audioResponse = await fetch(audioUrl, { 
+            signal: downloadController.signal 
+          });
           
-          return new Response(
-            JSON.stringify({ 
-              error: `Failed to fetch audio file: ${statusText}`,
-              status: status,
-              url: audioUrl,
-              errorType: 'storage'
-            }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
+          clearTimeout(downloadTimer);
+          
+          if (!audioResponse.ok) {
+            const status = audioResponse.status;
+            const statusText = audioResponse.statusText;
+            console.error(`Failed to fetch audio file. Status: ${status}, Status text: ${statusText}`);
+            
+            clearTimeout(functionTimeout);
+            return new Response(
+              JSON.stringify({ 
+                error: `Failed to fetch audio file: ${statusText}`,
+                status: status,
+                url: audioUrl,
+                errorType: 'storage'
+              }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          
+          // Get audio data as blob
+          audioBlob = await audioResponse.blob();
+          console.log('Audio blob created via URL fetch. Size:', 
+            (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB', 
+            'Type:', audioBlob.type);
+        } catch (abortError) {
+          if (abortError.name === 'AbortError') {
+            throw new Error('Download timed out after 10 seconds');
+          }
+          throw abortError;
         }
-        
-        // Get audio data as blob
-        audioBlob = await audioResponse.blob();
-        console.log('Audio blob created via URL fetch. Size:', 
-          (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB', 
-          'Type:', audioBlob.type);
       } catch (fetchError) {
         console.error('Both storage methods failed:', fetchError);
+        clearTimeout(functionTimeout);
         return new Response(
           JSON.stringify({ 
             error: `Failed to access audio file by any method: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`,
@@ -246,25 +296,27 @@ serve(async (req) => {
     }
     
     if (!audioBlob || audioBlob.size === 0) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: audioBlob ? 'Audio blob is empty (zero size)' : 'Failed to convert audio response to blob',
           errorType: 'conversion'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     // Double check the audio blob size against OpenAI's limit
     const audioSizeMB = audioBlob.size / (1024 * 1024);
     if (audioSizeMB > 25) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: `Audio file size (${audioSizeMB.toFixed(1)}MB) exceeds the OpenAI 25MB limit`,
           errorType: 'request'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     // Verify the audio blob type
@@ -305,7 +357,7 @@ serve(async (req) => {
     const formData = new FormData();
     formData.append('file', audioBlob, finalFileName);
     
-    // Try using the older whisper-1 model instead of gpt-4o-mini-transcribe which might have issues
+    // Use whisper-1 model which has proven to be more reliable
     formData.append('model', 'whisper-1');
     formData.append('language', 'en');
     formData.append('response_format', 'json');
@@ -316,19 +368,34 @@ serve(async (req) => {
     console.log('Calling OpenAI transcription API with model: whisper-1');
     console.log(`Sending ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB audio file named ${finalFileName}`);
     
-    // 4. Call the OpenAI API for transcription
+    // 4. Call the OpenAI API for transcription with timeout
     let transcriptionResponse;
     try {
       console.log('Sending request to OpenAI API...');
       console.log('FormData contains file named:', finalFileName);
       
-      transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openAIApiKey}`
-        },
-        body: formData
-      });
+      // Set a timeout for the OpenAI API call
+      const apiTimeout = 20000; // 20 second timeout
+      const apiController = new AbortController();
+      const apiTimer = setTimeout(() => apiController.abort(), apiTimeout);
+      
+      try {
+        transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openAIApiKey}`
+          },
+          body: formData,
+          signal: apiController.signal
+        });
+        
+        clearTimeout(apiTimer);
+      } catch (abortError) {
+        if (abortError.name === 'AbortError') {
+          throw new Error('OpenAI API call timed out after 20 seconds');
+        }
+        throw abortError;
+      }
       
       console.log('OpenAI API response status:', transcriptionResponse.status);
       
@@ -337,6 +404,7 @@ serve(async (req) => {
         const responseText = await transcriptionResponse.text();
         console.error(`OpenAI API error ${transcriptionResponse.status}: ${responseText}`);
         
+        clearTimeout(functionTimeout);
         return new Response(
           JSON.stringify({
             error: `OpenAI API error (${transcriptionResponse.status}): ${responseText}`,
@@ -350,6 +418,7 @@ serve(async (req) => {
       }
     } catch (error) {
       console.error('OpenAI API fetch error:', error);
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: `OpenAI API request failed: ${error instanceof Error ? error.message : 'Network error'}`,
@@ -357,7 +426,7 @@ serve(async (req) => {
           model: 'whisper-1'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
 
     if (!transcriptionResponse || !transcriptionResponse.ok) {
@@ -372,6 +441,7 @@ serve(async (req) => {
       console.error('OpenAI API error. Status:', transcriptionResponse?.status);
       console.error('Error details:', errorDetails);
       
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: `OpenAI API error: ${errorDetails}`, 
@@ -380,7 +450,7 @@ serve(async (req) => {
           model: 'whisper-1'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     console.log('OpenAI transcription successful with whisper-1 model');
@@ -397,16 +467,18 @@ serve(async (req) => {
         'No text field found');
     } catch (error) {
       console.error('Error parsing transcription response:', error);
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: `Failed to parse OpenAI response: ${error instanceof Error ? error.message : 'Unknown error'}`,
           errorType: 'parsing'
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     if (!transcriptionData || !transcriptionData.text) {
+      clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
           error: 'Invalid or empty response from OpenAI API',
@@ -414,7 +486,7 @@ serve(async (req) => {
           response: transcriptionData
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      );
     }
     
     const transcription = transcriptionData.text;
@@ -449,6 +521,7 @@ serve(async (req) => {
     console.log('Edge function completed successfully');
     console.log(`Total execution time: ${Date.now() - requestStartTime}ms`);
 
+    clearTimeout(functionTimeout);
     return new Response(
       JSON.stringify(result),
       { 
@@ -458,10 +531,11 @@ serve(async (req) => {
           'Content-Type': 'application/json' 
         } 
       }
-    )
+    );
   } catch (error) {
     console.error('Uncaught error in edge function:', error);
     
+    clearTimeout(functionTimeout);
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -475,6 +549,6 @@ serve(async (req) => {
           'Content-Type': 'application/json' 
         } 
       }
-    )
+    );
   }
 })
