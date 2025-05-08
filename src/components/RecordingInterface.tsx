@@ -20,6 +20,10 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const { user } = useAuth();
 
+  // Track total recording size to monitor for OpenAI's 25MB limit
+  const [estimatedSize, setEstimatedSize] = useState<number>(0);
+  const MAX_SIZE_MB = 25;
+
   useEffect(() => {
     return () => {
       if (timerRef.current) {
@@ -33,6 +37,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
 
   const startRecording = async () => {
     audioChunksRef.current = [];
+    setEstimatedSize(0);
     setUseDemoData(false);
     
     try {
@@ -41,36 +46,75 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
           echoCancellation: true,
           noiseSuppression: true,
           sampleRate: 44100, // Standard CD-quality sample rate
+          // Adding audio constraints to help with compression
+          channelCount: 1, // Mono recording to reduce size
         } 
       });
       
-      // Try to use MP3 if supported, else use one of the formats OpenAI accepts
+      // Try to use MP3 if supported, which has better compression, else use a compressed format OpenAI accepts
       const mimeType = MediaRecorder.isTypeSupported('audio/mp3') 
         ? 'audio/mp3' 
-        : MediaRecorder.isTypeSupported('audio/m4a') 
-          ? 'audio/m4a' 
-          : MediaRecorder.isTypeSupported('audio/mpeg') 
-            ? 'audio/mpeg'
-            : 'audio/webm'; // Fallback to webm which is widely supported
+        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+          ? 'audio/webm;codecs=opus'  // Opus codec typically has good compression
+          : MediaRecorder.isTypeSupported('audio/m4a') 
+            ? 'audio/m4a' 
+            : 'audio/webm'; // Fallback
       
-      console.log(`Using MIME type: ${mimeType} for recording`);
+      console.log(`Using MIME type: ${mimeType} for recording with compression`);
       
-      mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: mimeType
-      });
+      // Configure recorder with lower bitrate for compression
+      const options: MediaRecorderOptions = {
+        mimeType: mimeType,
+        audioBitsPerSecond: 64000, // 64kbps bitrate for compression (adjust as needed)
+      };
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, options);
       
       mediaRecorderRef.current.addEventListener('dataavailable', (event) => {
-        audioChunksRef.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          // Update estimated size
+          const newEstimatedSize = audioChunksRef.current.reduce((total, chunk) => total + chunk.size, 0) / (1024 * 1024);
+          setEstimatedSize(newEstimatedSize);
+          
+          // Warn if getting close to limit
+          if (newEstimatedSize > (MAX_SIZE_MB * 0.8) && newEstimatedSize < MAX_SIZE_MB) {
+            toast({
+              title: "Recording size warning",
+              description: `Recording is approaching the 25MB limit (${newEstimatedSize.toFixed(1)}MB)`,
+              variant: "warning"
+            });
+          } else if (newEstimatedSize >= MAX_SIZE_MB) {
+            // Auto-stop if exceeding limit
+            stopRecording();
+            toast({
+              title: "Recording stopped",
+              description: `Recording exceeded the ${MAX_SIZE_MB}MB limit. Processing shorter recording.`,
+              variant: "destructive"
+            });
+          }
+        }
       });
       
       mediaRecorderRef.current.addEventListener('stop', () => {
+        console.log(`Recording stopped. Chunks: ${audioChunksRef.current.length}, Est. size: ${estimatedSize.toFixed(2)}MB`);
+        
+        if (audioChunksRef.current.length === 0) {
+          toast({
+            variant: "destructive",
+            title: "Recording error",
+            description: "No audio was recorded. Please try again.",
+          });
+          return;
+        }
+        
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
         
-        console.log('Recording stopped. Audio blob:', audioBlob.type, 'size:', audioBlob.size);
+        console.log('Recording stopped. Audio blob:', audioBlob.type, 'size:', (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB');
         
-        // Process the recording using the real transcription service
+        // Process the recording using the transcription service
         if (user) {
           setIsProcessing(true);
           processRecording(
@@ -82,8 +126,8 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         }
       });
       
-      // Start recording with a 1-second timeslice to get data more frequently
-      mediaRecorderRef.current.start(1000);
+      // Start recording with smaller timeslice for more frequent chunks and size monitoring
+      mediaRecorderRef.current.start(500);
       setIsRecording(true);
       
       // Start timer
@@ -94,7 +138,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       
       toast({
         title: "Recording started",
-        description: "Your meeting is now being recorded",
+        description: "Your meeting is now being recorded with compression enabled",
       });
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -125,7 +169,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       
       toast({
         title: "Recording stopped",
-        description: "Processing your meeting recording...",
+        description: `Processing your compressed recording (${estimatedSize.toFixed(1)}MB)...`,
       });
     }
   };
@@ -140,11 +184,16 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             </h3>
             <p className="text-scribe-muted">
               {isRecording 
-                ? 'Capturing your meeting audio...' 
+                ? `Capturing audio (${estimatedSize.toFixed(1)}MB / ${MAX_SIZE_MB}MB)...` 
                 : isProcessing
                   ? 'Transcribing and analyzing your recording...'
                   : 'Click the button below to start recording your meeting'}
             </p>
+            {isRecording && (
+              <p className="text-xs text-blue-600 mt-1">
+                Compression enabled. Max file size: {MAX_SIZE_MB}MB
+              </p>
+            )}
             {useDemoData && (
               <p className="text-xs text-amber-600 mt-2">
                 Note: Currently showing demo data. Check console for debugging information.

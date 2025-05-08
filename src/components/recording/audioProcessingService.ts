@@ -1,3 +1,4 @@
+
 import { supabase, invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
@@ -5,6 +6,7 @@ import { generateRealisticTranscription } from './utils';
 
 // Bucket name constant to ensure consistency - using hyphen instead of underscore
 const AUDIO_BUCKET_NAME = 'audio-recordings';
+const MAX_FILE_SIZE_MB = 25; // OpenAI's limit is 25MB
 
 /**
  * Uploads audio to an existing bucket
@@ -41,14 +43,16 @@ async function uploadAudioToStorage(audioFile: File, userId: string, fileName: s
 }
 
 /**
- * Convert the audioBlob to proper format for OpenAI API
+ * Compress audio if needed and prepare for API
  * OpenAI supports MP3, MP4, MPEG, MPGA, M4A, WAV, and WEBM
  */
 function prepareAudioForAPI(audioBlob: Blob): Promise<{ blob: Blob, extension: string }> {
-  return new Promise((resolve) => {
-    // Get the current mime type
+  return new Promise(async (resolve) => {
+    // Get the current mime type and size
     const mimeType = audioBlob.type || 'audio/webm';
-    console.log('Original audio mime type:', mimeType);
+    const fileSizeMB = audioBlob.size / (1024 * 1024);
+    
+    console.log(`Preparing audio for API - Original: ${mimeType}, Size: ${fileSizeMB.toFixed(2)}MB`);
     
     // Determine the appropriate extension based on mime type
     let extension = '.mp3'; // Default
@@ -66,7 +70,21 @@ function prepareAudioForAPI(audioBlob: Blob): Promise<{ blob: Blob, extension: s
     
     console.log(`Using extension ${extension} based on mime type ${mimeType}`);
     
-    // Just use the blob as is - OpenAI can handle these formats directly
+    // Check if we need to compress further (within 10% of limit)
+    if (fileSizeMB > MAX_FILE_SIZE_MB * 0.9) {
+      console.log(`File size (${fileSizeMB.toFixed(2)}MB) is approaching OpenAI's ${MAX_FILE_SIZE_MB}MB limit. Additional compression may be applied.`);
+      
+      // We could apply additional compression here if needed
+      // For now, we're relying on the MediaRecorder settings in RecordingInterface.tsx
+      // But we log a warning for monitoring
+      toast({
+        variant: "warning",
+        title: "Large audio file",
+        description: `Audio is ${fileSizeMB.toFixed(1)}MB (OpenAI limit: ${MAX_FILE_SIZE_MB}MB). Processing may take longer.`,
+      });
+    }
+    
+    console.log(`Final audio format: ${extension}, Size: ${fileSizeMB.toFixed(2)}MB`);
     resolve({ blob: audioBlob, extension });
   });
 }
@@ -84,11 +102,17 @@ export async function processRecording(
       throw new Error("User not authenticated");
     }
 
-    console.log('Original audio blob type:', audioBlob.type, 'size:', audioBlob.size);
+    console.log('Original audio blob type:', audioBlob.type, 'size:', (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB');
+    
+    // Check file size immediately
+    const fileSizeMB = audioBlob.size / (1024 * 1024);
+    if (fileSizeMB > MAX_FILE_SIZE_MB) {
+      throw new Error(`Audio file size (${fileSizeMB.toFixed(1)}MB) exceeds the ${MAX_FILE_SIZE_MB}MB limit. Please record a shorter meeting or use higher compression.`);
+    }
     
     // Prepare the audio for the API
     const { blob: processedAudioBlob, extension } = await prepareAudioForAPI(audioBlob);
-    console.log('Processed audio blob type:', processedAudioBlob.type, 'size:', processedAudioBlob.size);
+    console.log('Processed audio blob type:', processedAudioBlob.type, 'size:', (processedAudioBlob.size / (1024 * 1024)).toFixed(2) + 'MB');
 
     // Generate a simple file name based on timestamp with the appropriate extension
     const timestamp = Date.now();
@@ -97,7 +121,7 @@ export async function processRecording(
     // Create a File from the processed Blob with the correct extension
     const audioFile = new File([processedAudioBlob], fileName, { type: processedAudioBlob.type });
     
-    console.log('File created:', fileName, 'Size:', audioFile.size, 'Type:', audioFile.type);
+    console.log('File created:', fileName, 'Size:', (audioFile.size / (1024 * 1024)).toFixed(2) + 'MB', 'Type:', audioFile.type);
     
     // Try to upload to the existing bucket
     let audioUrl;
@@ -114,7 +138,8 @@ export async function processRecording(
     console.log('Invoking edge function with payload:', {
       audioUrl,
       fileName,
-      userId
+      userId,
+      fileSize: (audioFile.size / (1024 * 1024)).toFixed(2) + 'MB'
     });
     
     try {
@@ -128,7 +153,8 @@ export async function processRecording(
         invokeEdgeFunction<TranscriptionResult>('process-audio', {
           audioUrl,
           fileName,
-          userId
+          userId,
+          fileSize: audioFile.size
         }),
         timeoutPromise
       ]) as TranscriptionResult;
@@ -187,7 +213,7 @@ export async function processRecording(
           userFacingErrorMessage = "Failed to process the audio file format.";
           break;
         case 'openai':
-          userFacingErrorMessage = "OpenAI service error. The audio format may be unsupported.";
+          userFacingErrorMessage = "OpenAI service error. The audio format may be unsupported or the file may be too large.";
           break;
         case 'parsing':
           userFacingErrorMessage = "Error processing the transcription response.";

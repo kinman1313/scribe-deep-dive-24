@@ -1,6 +1,6 @@
 
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
-// https://supabase.com/docs/guides/functions/quickstart
+// https://supabase.io/docs/guides/functions/quickstart
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2'
@@ -17,6 +17,7 @@ interface RequestPayload {
   audioUrl: string
   fileName: string
   userId: string
+  fileSize?: number
   audioBlob?: Blob
 }
 
@@ -117,15 +118,31 @@ serve(async (req) => {
       )
     }
     
-    const { audioUrl, fileName, userId } = requestData as RequestPayload;
+    const { audioUrl, fileName, userId, fileSize } = requestData as RequestPayload;
     
-    console.log('Request payload received:', { audioUrl, fileName, userId });
+    console.log('Request payload received:', { 
+      audioUrl, 
+      fileName, 
+      userId, 
+      fileSize: fileSize ? `${(fileSize / (1024 * 1024)).toFixed(2)}MB` : 'Not specified' 
+    });
     
     if (!audioUrl || !fileName || !userId) {
       return new Response(
         JSON.stringify({ 
           error: 'Missing required fields', 
           received: { audioUrl: !!audioUrl, fileName: !!fileName, userId: !!userId },
+          errorType: 'request'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    // Check file size if provided
+    if (fileSize && fileSize > 25 * 1024 * 1024) {
+      return new Response(
+        JSON.stringify({ 
+          error: `Audio file size (${(fileSize / (1024 * 1024)).toFixed(1)}MB) exceeds the OpenAI 25MB limit`,
           errorType: 'request'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -183,13 +200,15 @@ serve(async (req) => {
       }
       
       audioBlob = fileData;
-      console.log('Successfully downloaded file from Supabase Storage, size:', audioBlob.size, 'type:', audioBlob.type);
+      console.log('Successfully downloaded file from Supabase Storage, size:', 
+        (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB', 
+        'type:', audioBlob.type);
     } catch (storageError) {
       console.error('Supabase storage download failed, falling back to URL fetch:', storageError);
       
       // Fall back to the public URL if direct download fails
       try {
-        // 1. Download the audio file from the URL
+        // Download the audio file from the URL
         downloadMethod = "direct URL fetch";
         const audioResponse = await fetch(audioUrl);
         
@@ -209,9 +228,11 @@ serve(async (req) => {
           );
         }
         
-        // 2. Get audio data as blob
+        // Get audio data as blob
         audioBlob = await audioResponse.blob();
-        console.log('Audio blob created via URL fetch. Size:', audioBlob.size, 'Type:', audioBlob.type);
+        console.log('Audio blob created via URL fetch. Size:', 
+          (audioBlob.size / (1024 * 1024)).toFixed(2) + 'MB', 
+          'Type:', audioBlob.type);
       } catch (fetchError) {
         console.error('Both storage methods failed:', fetchError);
         return new Response(
@@ -234,8 +255,20 @@ serve(async (req) => {
       )
     }
     
+    // Double check the audio blob size against OpenAI's limit
+    const audioSizeMB = audioBlob.size / (1024 * 1024);
+    if (audioSizeMB > 25) {
+      return new Response(
+        JSON.stringify({ 
+          error: `Audio file size (${audioSizeMB.toFixed(1)}MB) exceeds the OpenAI 25MB limit`,
+          errorType: 'request'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
     // Verify the audio blob type
-    console.log(`Audio blob details - Size: ${audioBlob.size} bytes, Type: ${audioBlob.type || 'unknown'}`);
+    console.log(`Audio blob details - Size: ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB, Type: ${audioBlob.type || 'unknown'}`);
     console.log(`Downloaded using method: ${downloadMethod}`);
     
     // Get file extension from filename
@@ -276,6 +309,7 @@ serve(async (req) => {
     formData.append('response_format', 'json');
     
     console.log('Calling OpenAI transcription API');
+    console.log(`Sending ${(audioBlob.size / (1024 * 1024)).toFixed(2)}MB audio file named ${finalFileName}`);
     
     // 4. Call the OpenAI API for transcription
     let transcriptionResponse;
