@@ -1,3 +1,4 @@
+
 import { supabase, invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 import { toast } from '@/components/ui/use-toast';
@@ -142,6 +143,14 @@ export async function processRecording(
     });
     
     try {
+      // Add diagnostic information to help troubleshoot
+      const authStatus = await supabase.auth.getSession();
+      console.log('Auth status before edge function call:', {
+        hasSession: !!authStatus.data.session,
+        userId: authStatus.data.session?.user.id,
+        expiresAt: authStatus.data.session?.expires_at
+      });
+      
       // Add a timeout promise to detect if the edge function takes too long
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Edge function timeout after 30 seconds')), 30000);
@@ -174,14 +183,30 @@ export async function processRecording(
     } catch (error: any) {
       console.error('Edge function error:', error);
       
-      // Handle the case where the error response has detailed error info
-      if (error && typeof error === 'object' && 'error' in error) {
-        const errorObj = error.error;
-        if (typeof errorObj === 'object' && errorObj && 'message' in errorObj) {
-          throw new Error(`Transcription error: ${errorObj.message}`);
-        } else if (typeof errorObj === 'string') {
-          throw new Error(`Transcription error: ${errorObj}`);
+      // Detailed logging for troubleshooting edge function issues
+      if (error && typeof error === 'object') {
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        
+        // Extract network status if available
+        if ('status' in error) {
+          console.error(`HTTP Status: ${error.status}`);
         }
+        
+        if ('error' in error) {
+          const errorDetails = error.error;
+          console.error('Error response:', errorDetails);
+          
+          if (typeof errorDetails === 'object' && errorDetails && 'message' in errorDetails) {
+            throw new Error(`Transcription error: ${errorDetails.message}`);
+          } else if (typeof errorDetails === 'string') {
+            throw new Error(`Transcription error: ${errorDetails}`);
+          }
+        }
+      }
+      
+      // If the error is related to authentication
+      if (error.message && error.message.includes('auth')) {
+        throw new Error('Authentication error: Please sign out and back in to refresh your session');
       }
       
       throw new Error(`Process-audio function failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

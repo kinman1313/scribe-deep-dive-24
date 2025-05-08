@@ -1,4 +1,3 @@
-
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -39,7 +38,10 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
   
-  console.log(`Edge function process-audio - received ${req.method} request`);
+  // Get the authorization header early and log it for debugging
+  const authHeader = req.headers.get('Authorization');
+  console.log(`Edge function process-audio - received ${req.method} request with auth: ${authHeader ? 'present' : 'missing'}`);
+  
   const requestStartTime = Date.now();
 
   try {
@@ -75,32 +77,63 @@ serve(async (req) => {
     // Print the Supabase URL to debug
     console.log('Using Supabase URL:', supabaseUrl);
     
-    const supabaseClient = createClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
-        },
-      }
-    );
-    
-    console.log('Edge function started - Supabase client created');
-    
-    // Get the authorization header
-    const authHeader = req.headers.get('Authorization');
+    // Check the authorization header again
     if (!authHeader) {
       console.error('Missing Authorization header');
       clearTimeout(functionTimeout);
       return new Response(
         JSON.stringify({ 
-          error: 'Missing Authorization header', 
+          error: 'Missing Authorization header. Make sure you are signed in.', 
           errorType: 'auth' 
         }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    // Log complete authorization header for debugging (be careful with sensitive info in production)
+    console.log('Auth header received:', authHeader.substring(0, 20) + '...');
+    
+    const supabaseClient = createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      }
+    );
+
+    // Test authentication immediately
+    try {
+      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+      if (authError) {
+        console.error('Auth validation error:', authError);
+        clearTimeout(functionTimeout);
+        return new Response(
+          JSON.stringify({ 
+            error: `Auth validation failed: ${authError.message}`, 
+            errorType: 'auth',
+            details: authError
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      console.log('Auth validated successfully for user:', authData.user?.id);
+    } catch (authValidationError) {
+      console.error('Auth validation exception:', authValidationError);
+      clearTimeout(functionTimeout);
+      return new Response(
+        JSON.stringify({ 
+          error: `Auth validation exception: ${authValidationError instanceof Error ? authValidationError.message : 'Unknown error'}`, 
+          errorType: 'auth'
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    console.log('Edge function started - Supabase client created and auth validated');
+    
     // Get the request payload with a timeout to prevent hanging
     let requestData;
     try {
@@ -546,7 +579,8 @@ serve(async (req) => {
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Unknown error occurred',
         location: error instanceof Error && error.stack ? error.stack : 'No stack trace available',
-        errorType: 'server'
+        errorType: 'server',
+        time: new Date().toISOString()
       }),
       { 
         status: 500, 
