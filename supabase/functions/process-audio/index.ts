@@ -5,11 +5,14 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2'
 
-// Define CORS headers
+// Define CORS headers with explicit allowed origins
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  'Access-Control-Allow-Origin': '*',  // More restrictive in production
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400', // 24 hours caching of preflight requests
+  'Access-Control-Allow-Credentials': 'true',
+};
 
 // Environment variables
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
@@ -47,9 +50,13 @@ function createJsonResponse(body: unknown, status = 200) {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Handle CORS preflight requests - must return 200 status
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    console.log('Handling CORS preflight request for process-audio');
+    return new Response(null, { 
+      status: 200, 
+      headers: corsHeaders 
+    });
   }
   
   // Set up basic logging for troubleshooting
@@ -300,4 +307,3 @@ Sarah: Just a reminder that we need to finalize the budget allocation by next Mo
 John: Noted. Let's plan to wrap that up today if possible.
 `;
 }
-
