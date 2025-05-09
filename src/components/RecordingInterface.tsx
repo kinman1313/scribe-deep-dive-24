@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
@@ -43,26 +44,24 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 44100,
-          channelCount: 1, // Mono recording to reduce size
+          sampleRate: 16000, // 16kHz for speech - matches what we'll convert to
+          channelCount: 1, // Mono recording - better for speech
         } 
       });
       
-      // Try to use compressed audio format if supported
-      const mimeType = MediaRecorder.isTypeSupported('audio/mp3') 
-        ? 'audio/mp3' 
-        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/m4a') 
-            ? 'audio/m4a' 
-            : 'audio/webm';
+      // Try to use uncompressed audio format for highest quality before conversion
+      const mimeType = MediaRecorder.isTypeSupported('audio/wav') 
+        ? 'audio/wav' 
+        : MediaRecorder.isTypeSupported('audio/webm') 
+          ? 'audio/webm'
+          : 'audio/mp3';
       
-      console.log(`Using MIME type: ${mimeType} for recording with compression`);
+      console.log(`Using MIME type: ${mimeType} for recording before WAV conversion`);
       
-      // Configure recorder with lower bitrate for compression
+      // Use high quality audio for best transcription results
       const options: MediaRecorderOptions = {
         mimeType: mimeType,
-        audioBitsPerSecond: 64000, // 64kbps bitrate for compression
+        audioBitsPerSecond: 128000, // 128kbps for good quality source
       };
       
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -105,7 +104,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
           return;
         }
         
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
         
@@ -138,7 +137,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       
       toast({
         title: "Recording started",
-        description: "Your meeting is now being recorded with compression enabled",
+        description: "Your meeting is now being recorded with high quality audio",
       });
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -169,7 +168,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       
       toast({
         title: "Recording stopped",
-        description: `Processing your compressed recording (${estimatedSize.toFixed(1)}MB)...`,
+        description: `Processing your recording (${estimatedSize.toFixed(1)}MB)...`,
       });
     }
   };
@@ -191,7 +190,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             </p>
             {isRecording && (
               <p className="text-xs text-blue-600 mt-1">
-                Compression enabled. Max file size: {MAX_SIZE_MB}MB
+                Recording in high quality for WAV conversion. Max file size: {MAX_SIZE_MB}MB
               </p>
             )}
           </div>

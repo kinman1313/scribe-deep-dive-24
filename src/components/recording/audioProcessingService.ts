@@ -4,6 +4,58 @@ import { invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 
 /**
+ * Convert audio blob to WAV format using FFmpeg
+ */
+async function convertToWAV(audioBlob: Blob): Promise<Blob> {
+  try {
+    console.log("Converting audio to WAV format for better transcription compatibility...");
+    
+    // Create a File object from the Blob
+    const originalFile = new File([audioBlob], "original-recording", { type: audioBlob.type });
+    
+    // Create FormData to send to the Edge Function
+    const formData = new FormData();
+    formData.append('audioFile', originalFile);
+    
+    // Call the audio-convert Edge Function
+    const { supabase } = await import('@/integrations/supabase/client');
+    const { data: conversionResult, error: conversionError } = await supabase.functions.invoke('audio-convert', {
+      body: formData,
+    });
+    
+    if (conversionError) {
+      console.error("Error converting audio:", conversionError);
+      throw new Error(`Conversion failed: ${conversionError.message || 'Unknown error'}`);
+    }
+    
+    if (!conversionResult || !conversionResult.audioUrl) {
+      throw new Error('No audio URL returned from conversion');
+    }
+    
+    // Fetch the converted WAV file
+    const wavResponse = await fetch(conversionResult.audioUrl);
+    if (!wavResponse.ok) {
+      throw new Error(`Failed to fetch converted WAV: ${wavResponse.status}`);
+    }
+    
+    const wavBlob = await wavResponse.blob();
+    console.log("Audio successfully converted to WAV format:", 
+      (wavBlob.size / (1024 * 1024)).toFixed(2) + "MB");
+    
+    return wavBlob;
+  } catch (error) {
+    console.error("WAV conversion failed:", error);
+    toast({
+      title: "Audio conversion failed",
+      description: "Proceeding with original format. This may affect transcription quality.",
+      variant: "destructive"
+    });
+    // Return original blob if conversion fails
+    return audioBlob;
+  }
+}
+
+/**
  * Process a recording by sending it to the Edge Function for transcription
  */
 export async function processRecording(
@@ -16,15 +68,18 @@ export async function processRecording(
     // Show processing toast
     toast({
       title: "Processing audio",
-      description: "Sending to transcription service...",
+      description: "Converting and sending to transcription service...",
     });
     
     console.log("Processing audio recording, size:", 
       (audioBlob.size / (1024 * 1024)).toFixed(2) + "MB");
     
+    // Convert audio to WAV format for better OpenAI compatibility
+    const processedBlob = await convertToWAV(audioBlob);
+    
     // Generate unique filename
     const timestamp = Date.now();
-    const extension = audioBlob.type.includes('webm') ? '.webm' : '.mp3';
+    const extension = '.wav'; // Always use WAV extension after conversion
     const fileName = `recording_${timestamp}${extension}`;
     
     // Upload to Supabase Storage
@@ -53,7 +108,7 @@ export async function processRecording(
     const filePath = `${userId}/${fileName}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('audio-recordings')
-      .upload(filePath, audioBlob);
+      .upload(filePath, processedBlob);
       
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
@@ -76,7 +131,7 @@ export async function processRecording(
       audioUrl: urlData.publicUrl,
       fileName,
       userId,
-      fileSize: audioBlob.size,
+      fileSize: processedBlob.size,
       sessionInfo
     });
     
@@ -85,7 +140,7 @@ export async function processRecording(
       audioUrl: urlData.publicUrl,
       fileName,
       userId,
-      fileSize: audioBlob.size,
+      fileSize: processedBlob.size,
       sessionInfo
     });
     
