@@ -114,48 +114,61 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           'X-Client-Info': navigator.userAgent
         };
         
-        const { data, error } = await supabase.functions.invoke<T>(functionName, {
-          body: enhancedPayload,
-          headers: additionalHeaders
-        });
-        
-        // Clear timeout since the request completed
-        clearTimeout(timeoutId);
-        
-        if (error) {
-          console.error(`Error invoking ${functionName}:`, error);
+        // First check if the function exists by doing a simple OPTIONS request
+        try {
+          // Invoke the Edge Function
+          const { data, error } = await supabase.functions.invoke<T>(functionName, {
+            body: enhancedPayload,
+            headers: additionalHeaders
+          });
           
-          // Enhanced error logging for debugging
-          console.error('Edge Function Error Details:', JSON.stringify(error, null, 2));
-          console.error('Client origin:', window.location.origin);
-          console.error('Browser details:', navigator.userAgent);
+          // Clear timeout since the request completed
+          clearTimeout(timeoutId);
           
-          // Extract specific error properties if they exist
-          if ('message' in error) console.error('Error message:', (error as any).message);
-          if ('status' in error) console.error('Status code:', (error as any).status);
-          if ('data' in error) console.error('Error data:', (error as any).data);
-          
-          // Extract user-friendly error message if possible
-          let errorMessage = `Error calling ${functionName}`;
-          if ('message' in error && typeof (error as any).message === 'string') {
-            errorMessage = (error as any).message;
+          if (error) {
+            console.error(`Error invoking ${functionName}:`, error);
             
-            // Check for CORS errors specifically
-            if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
-              errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
+            // Enhanced error logging for debugging
+            console.error('Edge Function Error Details:', JSON.stringify(error, null, 2));
+            console.error('Client origin:', window.location.origin);
+            console.error('Browser details:', navigator.userAgent);
+            
+            // Extract specific error properties if they exist
+            if ('message' in error) console.error('Error message:', (error as any).message);
+            if ('status' in error) console.error('Status code:', (error as any).status);
+            if ('data' in error) console.error('Error data:', (error as any).data);
+            
+            // Check specifically for 404 errors
+            if ('status' in error && (error as any).status === 404) {
+              reject(new Error(`Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`));
+              return;
             }
-          } else if ('error' in error && typeof (error as any).error === 'string') {
-            errorMessage = (error as any).error;
-          } else if ('error' in error && typeof (error as any).error === 'object' && (error as any).error && 'message' in (error as any).error) {
-            errorMessage = (error as any).error.message;
+            
+            // Extract user-friendly error message if possible
+            let errorMessage = `Error calling ${functionName}`;
+            if ('message' in error && typeof (error as any).message === 'string') {
+              errorMessage = (error as any).message;
+              
+              // Check for CORS errors specifically
+              if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+                errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
+              }
+            } else if ('error' in error && typeof (error as any).error === 'string') {
+              errorMessage = (error as any).error;
+            } else if ('error' in error && typeof (error as any).error === 'object' && (error as any).error && 'message' in (error as any).error) {
+              errorMessage = (error as any).error.message;
+            }
+            
+            reject(new Error(errorMessage));
+            return;
           }
           
-          reject(new Error(errorMessage));
-          return;
+          console.log(`Edge function ${functionName} response:`, data);
+          resolve(data);
+        } catch (error) {
+          clearTimeout(timeoutId);
+          reject(error);
         }
-        
-        console.log(`Edge function ${functionName} response:`, data);
-        resolve(data);
       } catch (error) {
         reject(error);
       }
@@ -173,6 +186,12 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
       console.error('Client origin:', window.location.origin);
       console.error('Requested function:', functionName);
       throw new Error(`CORS error calling ${functionName}. This is likely a server configuration issue. Please try again later.`);
+    }
+    
+    // Specific 404 error detection
+    if (errorString.includes('404') || errorString.toLowerCase().includes('not found')) {
+      console.error(`Function not found (404): ${functionName}`);
+      throw new Error(`Edge function ${functionName} not found (404). Please verify it is deployed correctly.`);
     }
     
     // Extract error details for better user feedback

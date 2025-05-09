@@ -49,14 +49,14 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
         } 
       });
       
-      // Try to use uncompressed audio format for highest quality before conversion
+      // Try to use uncompressed audio format for highest quality
       const mimeType = MediaRecorder.isTypeSupported('audio/wav') 
         ? 'audio/wav' 
         : MediaRecorder.isTypeSupported('audio/webm') 
           ? 'audio/webm'
           : 'audio/mp3';
       
-      console.log(`Using MIME type: ${mimeType} for recording before WAV conversion`);
+      console.log(`Using MIME type: ${mimeType} for recording`);
       
       // Use high quality audio for best transcription results
       const options: MediaRecorderOptions = {
@@ -104,7 +104,8 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
           return;
         }
         
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        // Use the original format since we aren't converting
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
         const url = URL.createObjectURL(audioBlob);
         setAudioURL(url);
         
@@ -137,7 +138,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
       
       toast({
         title: "Recording started",
-        description: "Your meeting is now being recorded with high quality audio",
+        description: "Your meeting is now being recorded",
       });
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -190,7 +191,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             </p>
             {isRecording && (
               <p className="text-xs text-blue-600 mt-1">
-                Recording in high quality for WAV conversion. Max file size: {MAX_SIZE_MB}MB
+                Recording in original format. Max file size: {MAX_SIZE_MB}MB
               </p>
             )}
           </div>
