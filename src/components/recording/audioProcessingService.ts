@@ -1,11 +1,10 @@
 
 import { toast } from '@/components/ui/use-toast';
-import { generateRealisticTranscription } from './utils';
 import { invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 
 /**
- * Process a recording by sending it to the Edge Function or using demo data
+ * Process a recording by sending it to the Edge Function for transcription
  */
 export async function processRecording(
   audioBlob: Blob,
@@ -85,24 +84,21 @@ export async function processRecording(
       throw new Error('Empty result from edge function');
     }
     
-    // Even if there's an error message, as long as we have transcription, consider it a success
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    
     if (!result.transcription) {
       throw new Error('Empty transcription result');
     }
     
-    // Log any error message from the edge function (didn't prevent success)
-    if (result.error || result.message) {
-      console.log('Edge function message:', result.message);
-      console.warn('Edge function warning:', result.error);
-    }
-    
-    // Call completion handler
+    // Call completion handler with actual transcription
     onComplete(result.transcription);
     
     // Show success message
     toast({
       title: "Transcription complete",
-      description: result.message ? result.message : "Your recording has been processed successfully.",
+      description: "Your recording has been processed successfully.",
     });
     
   } catch (error) {
@@ -112,12 +108,10 @@ export async function processRecording(
     toast({
       variant: "destructive",
       title: "Processing error",
-      description: "We encountered an issue, but we're showing you demo data instead.",
+      description: error instanceof Error ? error.message : "An unknown error occurred",
     });
     
-    // Use demo data as fallback
-    const demoTranscription = generateRealisticTranscription();
-    onComplete(demoTranscription);
+    // Call error handler
     onError();
   }
 }

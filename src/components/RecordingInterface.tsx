@@ -8,15 +8,13 @@ import { AudioPreview } from './recording/AudioPreview';
 import { TranscriptionFeatures } from './recording/TranscriptionFeatures';
 import { processRecording } from './recording/audioProcessingService';
 import { RecordingInterfaceProps } from './recording/types';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { InfoIcon } from 'lucide-react';
 
 export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceProps) {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState<number>(0);
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [useDemoData, setUseDemoData] = useState<boolean>(true);
+  const [useDemoData, setUseDemoData] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -177,14 +175,6 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
   return (
     <Card className="w-full shadow-lg border-scribe-primary/20">
       <CardContent className="p-6">
-        <Alert className="mb-6 bg-amber-50 border-amber-200">
-          <InfoIcon className="h-4 w-4 text-amber-600" />
-          <AlertTitle className="text-amber-800">Maintenance Notice</AlertTitle>
-          <AlertDescription className="text-amber-700">
-            Our transcription service is currently in maintenance mode. All recordings will use demo data until service is restored.
-          </AlertDescription>
-        </Alert>
-        
         <div className="flex flex-col items-center space-y-6">
           <div className="text-center">
             <h3 className="text-2xl font-semibold text-scribe-text mb-2">
@@ -194,7 +184,7 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
               {isRecording 
                 ? `Capturing audio (${estimatedSize.toFixed(1)}MB / ${MAX_SIZE_MB}MB)...` 
                 : isProcessing
-                  ? 'Processing your recording with demo mode...'
+                  ? 'Processing your recording...'
                   : 'Click the button below to start recording your meeting'}
             </p>
             {isRecording && (
@@ -202,9 +192,6 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
                 Compression enabled. Max file size: {MAX_SIZE_MB}MB
               </p>
             )}
-            <p className="text-xs text-amber-600 mt-2">
-              Note: Currently showing demo data while we fix our transcription service.
-            </p>
           </div>
           
           <RecordingButton
