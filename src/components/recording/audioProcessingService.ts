@@ -119,7 +119,9 @@ export async function processRecording(
     
     // Direct test of the Edge Function endpoint to check connectivity
     try {
-      const testEndpoint = `${supabase.supabaseUrl}/functions/v1/process-audio`;
+      // Using the constant instead of accessing the protected property
+      const SUPABASE_URL = "https://fuqibkjdvpmbegibcyhl.supabase.co";
+      const testEndpoint = `${SUPABASE_URL}/functions/v1/process-audio`;
       console.log(`Testing direct access to Edge Function at: ${testEndpoint}`);
       
       const testResponse = await fetch(testEndpoint, {
