@@ -76,14 +76,25 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     
     // Get fresh auth session to include in the invocation
     const { data: authData } = await supabase.auth.getSession();
-    console.log(`Invoking edge function ${functionName} with:`, {
+    
+    // Add origin information to help with CORS debugging
+    const enhancedPayload = {
       ...payload,
+      clientInfo: {
+        ...(payload?.clientInfo || {}),
+        origin: window.location.origin,
+        host: window.location.host,
+        href: window.location.href,
+        clientTimestamp: new Date().toISOString()
+      },
       sessionInfo: {
         userId: authData?.session?.user?.id,
         hasSession: !!authData?.session,
         expiresAt: authData?.session ? new Date(authData.session.expires_at * 1000).toISOString() : 'none'
       }
-    });
+    };
+    
+    console.log(`Invoking edge function ${functionName} with:`, enhancedPayload);
     
     // Create promise with timeout
     const functionPromise = new Promise<T>(async (resolve, reject) => {
@@ -96,8 +107,15 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           reject(new Error(`Edge function ${functionName} timed out after ${FUNCTION_TIMEOUT_MS / 1000} seconds`));
         }, FUNCTION_TIMEOUT_MS);
         
+        // Include more debugging info in headers
+        const additionalHeaders = {
+          'X-Client-Origin': window.location.origin,
+          'X-Client-Info': navigator.userAgent
+        };
+        
         const { data, error } = await supabase.functions.invoke<T>(functionName, {
-          body: payload
+          body: enhancedPayload,
+          headers: additionalHeaders
         });
         
         // Clear timeout since the request completed
@@ -139,6 +157,15 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     return await functionPromise;
   } catch (error) {
     console.error(`Exception invoking ${functionName}:`, error);
+    
+    // Specific CORS error detection
+    const errorString = String(error);
+    if (errorString.includes('CORS') || errorString.includes('cross-origin')) {
+      console.error('CORS error detected in edge function invocation');
+      console.error('Client origin:', window.location.origin);
+      console.error('Requested function:', functionName);
+      throw new Error(`CORS error calling ${functionName}. This is likely a server configuration issue.`);
+    }
     
     // Extract error details for better user feedback
     let errorMessage = formatErrorMessage(error);

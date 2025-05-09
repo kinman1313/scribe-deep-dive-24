@@ -36,6 +36,7 @@ serve(async (req) => {
   console.log(`[${requestId}] Audio convert function called [${new Date().toISOString()}]`);
   console.log(`[${requestId}] Request method: ${req.method}`);
   console.log(`[${requestId}] Request headers:`, Object.fromEntries(req.headers.entries()));
+  console.log(`[${requestId}] Request origin:`, req.headers.get('origin') || 'No origin header');
   
   try {
     // Check auth header

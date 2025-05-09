@@ -17,6 +17,14 @@ async function convertToWAV(audioBlob: Blob): Promise<Blob> {
     const formData = new FormData();
     formData.append('audioFile', originalFile);
     
+    // Add origin information for debugging CORS issues
+    const originInfo = {
+      origin: window.location.origin,
+      host: window.location.host,
+      pathname: window.location.pathname
+    };
+    console.log("Origin information for CORS debugging:", originInfo);
+    
     // Call the audio-convert Edge Function
     const { supabase } = await import('@/integrations/supabase/client');
     
@@ -29,10 +37,16 @@ async function convertToWAV(audioBlob: Blob): Promise<Blob> {
     if (conversionError) {
       console.error("Error converting audio:", conversionError);
       
-      // Check specifically for CORS-related errors
-      if (conversionError.message?.includes('CORS') || conversionError.message?.includes('cross-origin')) {
-        console.error("CORS error detected:", conversionError.message);
-        throw new Error(`CORS error: ${conversionError.message}. Please check server configuration.`);
+      // Enhanced CORS error detection
+      const errorMessage = conversionError.message || '';
+      if (
+        errorMessage.includes('CORS') || 
+        errorMessage.includes('cross-origin') || 
+        errorMessage.includes('blocked by') ||
+        errorMessage.includes('preflight')
+      ) {
+        console.error("CORS error detected:", errorMessage);
+        throw new Error(`CORS policy error: ${errorMessage}. This is likely a server configuration issue. Please check the Edge Function logs.`);
       }
       
       throw new Error(`Conversion failed: ${conversionError.message || 'Unknown error'}`);
@@ -141,7 +155,9 @@ export async function processRecording(
       timestamp: new Date().toISOString(),
       userAgent: navigator.userAgent,
       origin: window.location.origin,
-      pathname: window.location.pathname
+      pathname: window.location.pathname,
+      host: window.location.host,
+      href: window.location.href
     };
     
     console.log("Invoking edge function process-audio with:", {
@@ -206,16 +222,24 @@ export async function processRecording(
   } catch (error) {
     console.error('Error in processRecording:', error);
     
-    // Check specifically for CORS errors
+    // Enhanced error detection for different error types
     const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Specific error handling for different error types
     if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
       toast({
         variant: "destructive",
         title: "CORS Error",
-        description: "The server blocked the request. This might be a temporary issue. Please try again later.",
+        description: "Server configuration issue detected. We're working on resolving this. Please try again later.",
+      });
+    } else if (errorMessage.includes('session') || errorMessage.includes('expired')) {
+      toast({
+        variant: "destructive",
+        title: "Session Error",
+        description: "Your login session has expired. Please sign in again.",
       });
     } else {
-      // Show detailed error message for other errors
+      // General error toast for other errors
       toast({
         variant: "destructive",
         title: "Transcription failed",
@@ -223,11 +247,11 @@ export async function processRecording(
       });
     }
     
-    // Additional troubleshooting toast with common fixes
+    // Diagnostic information toast for all errors
     toast({
       variant: "default",
-      title: "Troubleshooting tips",
-      description: "Check your Edge Function logs in the Supabase dashboard to see detailed error messages. Verify that your OpenAI API key is correctly formatted (starts with 'sk-').",
+      title: "Technical details",
+      description: `Error type: ${error instanceof Error ? error.name : 'Unknown'}, Origin: ${window.location.origin}`,
     });
     
     // Call error handler
