@@ -114,8 +114,8 @@ export async function processRecording(
     if (isMockData) {
       console.warn("Using mock transcription data:", result.message);
       toast({
-        title: "OpenAI API Issue",
-        description: "Using mock data. Please check if your OpenAI API key is configured in Supabase Edge Function Secrets.",
+        title: "OpenAI API Key Issue",
+        description: result.message || "Using mock data. Check the Edge Function logs for details.",
         variant: "destructive"
       });
     } else {
@@ -143,7 +143,7 @@ export async function processRecording(
     toast({
       variant: "default",
       title: "Troubleshooting tips",
-      description: "Check if your OpenAI API key is set in Supabase Edge Function Secrets. Try a shorter recording or refresh your login session.",
+      description: "Check your Edge Function logs in the Supabase dashboard to see detailed error messages. Verify that your OpenAI API key is correctly formatted (starts with 'sk-').",
     });
     
     // Call error handler

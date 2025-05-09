@@ -1,3 +1,4 @@
+
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -95,14 +96,26 @@ serve(async (req) => {
       }, 200); // Return 200 with mock data instead of 400 error
     }
     
-    // Check if OpenAI API key is configured
+    // Check if OpenAI API key is configured and valid
     if (!OPENAI_API_KEY) {
       console.error('OpenAI API key not configured in Edge Function secrets');
-      // Instead of failing, use mock transcription for testing
       return createJsonResponse({
         transcription: generateMockTranscription(),
-        message: 'Using mock data (OpenAI API key not configured)'
+        message: 'Using mock data (OpenAI API key not configured in Edge Function secrets)'
       }, 200);
+    } else {
+      // Log first and last few characters of the key for debugging without exposing the full key
+      const keyLength = OPENAI_API_KEY.length;
+      console.log(`OpenAI API key configured (length: ${keyLength}, starts with: ${OPENAI_API_KEY.slice(0, 3)}..., ends with: ...${OPENAI_API_KEY.slice(-3)})`);
+      
+      // Check if key starts with "sk-" which is the expected format for OpenAI keys
+      if (!OPENAI_API_KEY.startsWith('sk-')) {
+        console.error('OpenAI API key does not appear to be in the valid format (should start with "sk-")');
+        return createJsonResponse({
+          transcription: generateMockTranscription(),
+          message: 'Using mock data (OpenAI API key format appears invalid, should start with "sk-")'
+        }, 200);
+      }
     }
     
     try {
@@ -151,7 +164,7 @@ serve(async (req) => {
         }, 200);
       }
       
-      console.log(`Audio file downloaded successfully, size: ${audioBlob.size} bytes`);
+      console.log(`Audio file downloaded successfully, size: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
       
       // Prepare audio file for OpenAI API
       const formData = new FormData();
@@ -161,7 +174,7 @@ serve(async (req) => {
       formData.append('response_format', 'json');
       
       // Call OpenAI API with timeout and proper error handling
-      console.log('Calling OpenAI transcription API');
+      console.log('Calling OpenAI transcription API with valid key');
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
@@ -208,7 +221,7 @@ serve(async (req) => {
         
         return createJsonResponse({
           transcription: generateMockTranscription(),
-          message: `Using mock data (OpenAI API returned ${transcriptionResponse.status})`
+          message: `Using mock data (OpenAI API returned error: ${transcriptionResponse.status}, ${errorText})`
         }, 200);
       }
       
@@ -286,3 +299,5 @@ Sarah: Just a reminder that we need to finalize the budget allocation by next Mo
 
 John: Noted. Let's plan to wrap that up today if possible.
 `;
+}
+
