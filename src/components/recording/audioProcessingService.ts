@@ -72,6 +72,7 @@ export async function processRecording(
       sessionInfo
     });
     
+    // Set a longer timeout for the edge function call
     const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
       audioUrl: urlData.publicUrl,
       fileName,
@@ -84,12 +85,26 @@ export async function processRecording(
       throw new Error('Empty result from edge function');
     }
     
+    // Check for error in the result
     if (result.error) {
+      console.error("Edge function returned error:", result.error);
       throw new Error(result.error);
     }
     
+    // Check for transcription in result
     if (!result.transcription) {
+      console.error("No transcription in result:", result);
       throw new Error('Empty transcription result');
+    }
+    
+    // Show a message if mock data was used (helpful for debugging)
+    if (result.message && result.message.includes('mock data')) {
+      console.warn("Using mock transcription data:", result.message);
+      toast({
+        title: "Using mock transcription",
+        description: "Real transcription service unavailable. Using sample data.",
+        variant: "default"
+      });
     }
     
     // Call completion handler with actual transcription

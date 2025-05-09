@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
@@ -119,7 +118,10 @@ export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceP
             audioBlob, 
             user.id, 
             onTranscriptionReady,
-            () => setUseDemoData(true)
+            () => {
+              // Just set processing to false if there's an error
+              setIsProcessing(false);
+            }
           ).finally(() => setIsProcessing(false));
         }
       });
