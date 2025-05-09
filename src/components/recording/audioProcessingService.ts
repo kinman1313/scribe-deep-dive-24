@@ -31,6 +31,20 @@ export async function processRecording(
     // Upload to Supabase Storage
     const { supabase } = await import('@/integrations/supabase/client');
     
+    // Get current auth session info for debugging
+    const { data: { session } } = await supabase.auth.getSession();
+    const sessionInfo = session ? {
+      userId: session.user.id,
+      hasSession: true,
+      expiresAt: new Date(session.expires_at * 1000).toISOString()
+    } : {
+      userId: 'none',
+      hasSession: false,
+      expiresAt: 'none'
+    };
+    
+    console.log("Auth session check:", sessionInfo);
+    
     // Upload the file to Supabase Storage
     const filePath = `${userId}/${fileName}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -50,20 +64,35 @@ export async function processRecording(
       throw new Error('Failed to get file URL');
     }
     
-    // Call Edge Function
+    // Call Edge Function with session info for debugging
+    console.log("Invoking edge function process-audio with:", {
+      audioUrl: urlData.publicUrl,
+      fileName,
+      userId,
+      fileSize: audioBlob.size,
+      sessionInfo
+    });
+    
     const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
       audioUrl: urlData.publicUrl,
       fileName,
       userId,
-      fileSize: audioBlob.size
+      fileSize: audioBlob.size,
+      sessionInfo
     });
     
-    if (!result || !result.transcription) {
+    if (!result) {
+      throw new Error('Empty result from edge function');
+    }
+    
+    // Even if there's an error message, as long as we have transcription, consider it a success
+    if (!result.transcription) {
       throw new Error('Empty transcription result');
     }
     
     // Log any error message from the edge function (didn't prevent success)
-    if (result.error) {
+    if (result.error || result.message) {
+      console.log('Edge function message:', result.message);
       console.warn('Edge function warning:', result.error);
     }
     
@@ -73,7 +102,7 @@ export async function processRecording(
     // Show success message
     toast({
       title: "Transcription complete",
-      description: "Your recording has been processed successfully.",
+      description: result.message ? result.message : "Your recording has been processed successfully.",
     });
     
   } catch (error) {
