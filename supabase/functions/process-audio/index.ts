@@ -339,3 +339,4 @@ Sarah: Just a reminder that we need to finalize the budget allocation by next Mo
 
 John: Noted. Let's plan to wrap that up today if possible.
 `;
+}

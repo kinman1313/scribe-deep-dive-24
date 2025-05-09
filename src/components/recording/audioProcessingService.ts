@@ -1,7 +1,7 @@
 
 import { toast } from '@/components/ui/use-toast';
-import { invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
+import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Generate demo transcription when real transcription fails
@@ -43,13 +43,10 @@ export async function processRecording(
     // Generate unique filename based on original format
     const timestamp = Date.now();
     const extension = audioBlob.type.includes('wav') ? '.wav' : 
-                      audioBlob.type.includes('mp3') ? '.mp3' : '.webm';
+                     audioBlob.type.includes('mp3') ? '.mp3' : '.webm';
     const fileName = `recording_${timestamp}${extension}`;
     
     console.log(`Using original audio format: ${audioBlob.type}, file: ${fileName}`);
-    
-    // Upload to Supabase Storage
-    const { supabase } = await import('@/integrations/supabase/client');
     
     // Get current auth session info for debugging
     const { data: { session } } = await supabase.auth.getSession();
@@ -72,6 +69,28 @@ export async function processRecording(
     
     // Upload the file to Supabase Storage
     const filePath = `${userId}/${fileName}`;
+    
+    // Check if the 'audio-recordings' bucket exists, if not create it
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      const audioBucketExists = buckets?.some(bucket => bucket.name === 'audio-recordings');
+      
+      if (!audioBucketExists) {
+        console.log("Creating audio-recordings bucket");
+        const { error: createBucketError } = await supabase.storage.createBucket('audio-recordings', {
+          public: true
+        });
+        
+        if (createBucketError) {
+          console.error("Error creating bucket:", createBucketError);
+          throw new Error(`Failed to create storage bucket: ${createBucketError.message}`);
+        }
+      }
+    } catch (bucketError) {
+      console.error("Error checking/creating buckets:", bucketError);
+      // Continue anyway, in case the error is just due to permissions
+    }
+    
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('audio-recordings')
       .upload(filePath, audioBlob);
@@ -102,7 +121,7 @@ export async function processRecording(
       href: window.location.href
     };
     
-    console.log("Invoking edge function process-audio with:", {
+    console.log("Preparing to call process-audio edge function with:", {
       audioUrl: urlData.publicUrl,
       fileName,
       userId,
@@ -111,80 +130,92 @@ export async function processRecording(
       clientInfo
     });
     
-    // Add deployment check message
-    toast({
-      title: "Checking function deployment",
-      description: "Verifying the transcription service is available...",
-    });
-    
     // Direct test of the Edge Function endpoint to check connectivity
     try {
       // Using the constant instead of accessing the protected property
       const SUPABASE_URL = "https://fuqibkjdvpmbegibcyhl.supabase.co";
-      const testEndpoint = `${SUPABASE_URL}/functions/v1/process-audio`;
-      console.log(`Testing direct access to Edge Function at: ${testEndpoint}`);
+      console.log(`Testing direct access to Edge Function at: ${SUPABASE_URL}/functions/v1/process-audio`);
       
-      const testResponse = await fetch(testEndpoint, {
+      // Just log the test result, don't block on it
+      fetch(`${SUPABASE_URL}/functions/v1/process-audio`, {
         method: 'OPTIONS',
         headers: {
           'Origin': window.location.origin
         }
+      }).then(response => {
+        console.log("Edge Function connectivity test results:", {
+          status: response.status,
+          statusText: response.statusText,
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries()),
+          url: response.url
+        });
+      }).catch(testError => {
+        console.error("Edge Function connectivity test error:", testError);
       });
-      
-      console.log("Edge Function connectivity test results:", {
-        status: testResponse.status,
-        statusText: testResponse.statusText,
-        ok: testResponse.ok,
-        headers: Object.fromEntries(testResponse.headers.entries()),
-        url: testResponse.url
-      });
-      
-      if (!testResponse.ok) {
-        console.warn("Edge Function direct access test failed. This may indicate deployment or CORS issues.");
-      }
     } catch (testError) {
-      console.error("Edge Function connectivity test error:", testError);
+      console.error("Edge Function setup test error:", testError);
     }
     
-    // Call the process-audio Edge Function directly
+    // Call the Edge Function using the Supabase client
     try {
-      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
+      toast({
+        title: "Transcribing audio",
+        description: "Processing your recording...",
+      });
+      
+      console.log("Calling process-audio edge function");
+      
+      const payload = {
         audioUrl: urlData.publicUrl,
         fileName,
         userId,
         fileSize: audioBlob.size,
         sessionInfo,
         clientInfo
-      });
+      };
       
-      console.log("Edge function response received:", result);
+      // Make the actual call
+      const { data: functionData, error: functionError } = await supabase.functions.invoke<TranscriptionResult>(
+        'process-audio',
+        {
+          body: payload
+        }
+      );
       
-      if (!result) {
+      if (functionError) {
+        console.error("Edge function error:", functionError);
+        throw new Error(`Edge function error: ${functionError.message}`);
+      }
+      
+      console.log("Edge function response received:", functionData);
+      
+      if (!functionData) {
         throw new Error('Empty result from edge function');
       }
       
       // Check for error in the result
-      if (result.error) {
-        console.error("Edge function returned error:", result.error);
-        throw new Error(result.error);
+      if (functionData.error) {
+        console.error("Edge function returned error:", functionData.error);
+        throw new Error(functionData.error);
       }
       
       // Check for transcription in result
-      if (!result.transcription) {
-        console.error("No transcription in result:", result);
+      if (!functionData.transcription) {
+        console.error("No transcription in result:", functionData);
         throw new Error('Empty transcription result');
       }
       
       // Check if the transcription contains the mock data indicator
-      const isMockData = result.message && result.message.includes('mock data');
+      const isMockData = functionData.message && functionData.message.includes('mock data');
       
       // Show a message if mock data was used (helpful for debugging)
       if (isMockData) {
-        console.warn("Using mock transcription data:", result.message);
+        console.warn("Using mock transcription data:", functionData.message);
         toast({
-          title: "OpenAI API Key Issue",
-          description: result.message || "Using mock data. Check the Edge Function logs for details.",
-          variant: "destructive"
+          title: "Using Demo Data",
+          description: functionData.message || "Using demo data. Check the Edge Function logs for details.",
+          variant: "default"
         });
       } else {
         // Success message for actual transcription
@@ -195,10 +226,9 @@ export async function processRecording(
       }
       
       // Call completion handler with actual transcription
-      onComplete(result.transcription);
+      onComplete(functionData.transcription);
     } catch (error) {
       console.error('Error calling process-audio edge function:', error);
-      console.log('Full error details:', error);
       
       // Check if this is a deployment issue
       const errorString = String(error);
@@ -213,14 +243,7 @@ export async function processRecording(
         toast({
           variant: "destructive",
           title: "Edge Function Connectivity Issue",
-          description: "Cannot reach the transcription service. This could be due to CORS, network issues, or function deployment problems.",
-        });
-        
-        // Show helper message about deployment
-        toast({
-          variant: "default",
-          title: "Troubleshooting Steps",
-          description: "1. Check if the function is deployed in Supabase. 2. Check for CORS settings. 3. Check browser console for specific errors.",
+          description: "Cannot reach the transcription service. Using demo data instead.",
         });
         
         // Use demo data when function isn't deployed
@@ -243,7 +266,7 @@ export async function processRecording(
       toast({
         variant: "destructive",
         title: "CORS Error",
-        description: "Server configuration issue detected. We're working on resolving this. Please try again later.",
+        description: "Server configuration issue detected. Using demo data instead.",
       });
     } else if (errorMessage.includes('session') || errorMessage.includes('expired')) {
       toast({
@@ -261,13 +284,6 @@ export async function processRecording(
         title: "Edge Function Error",
         description: "Cannot reach the transcription service. Using demo data instead.",
       });
-      
-      // Show a more detailed message with possible solutions
-      toast({
-        variant: "default",
-        title: "Possible Solutions",
-        description: "Try redeploying the function, checking CORS settings in Supabase, or restarting your browser.",
-      });
     } else {
       // General error toast for other errors
       toast({
@@ -276,6 +292,10 @@ export async function processRecording(
         description: errorMessage || "An unknown error occurred during transcription",
       });
     }
+    
+    // Use demo transcription if there was an error
+    const demoText = generateDemoTranscription();
+    onComplete(demoText);
     
     // Call error handler
     onError();

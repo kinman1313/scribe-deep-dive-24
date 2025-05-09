@@ -1,3 +1,4 @@
+
 import { supabase, checkAuthSession } from '@/integrations/supabase/client';
 import { TranscriptionResult } from '@/components/recording/types';
 import { logError, formatErrorMessage } from '@/utils/errorLogger';
@@ -107,6 +108,27 @@ export class AudioService {
       throw new Error("Your session has expired. Please sign in again before uploading");
     }
     
+    // Check if the bucket exists, if not create it
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      const audioBucketExists = buckets?.some(bucket => bucket.name === AUDIO_BUCKET_NAME);
+      
+      if (!audioBucketExists) {
+        console.log(`Creating ${AUDIO_BUCKET_NAME} bucket`);
+        const { error: createBucketError } = await supabase.storage.createBucket(AUDIO_BUCKET_NAME, {
+          public: true
+        });
+        
+        if (createBucketError) {
+          console.error("Error creating bucket:", createBucketError);
+          throw new Error(`Failed to create storage bucket: ${createBucketError.message}`);
+        }
+      }
+    } catch (bucketError) {
+      console.error("Error checking/creating buckets:", bucketError);
+      // Continue anyway, in case the error is just due to permissions
+    }
+    
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(AUDIO_BUCKET_NAME)
@@ -157,12 +179,6 @@ export class AudioService {
     });
     
     try {
-      // Call the Edge Function with a timeout
-      console.log('Calling edge function with payload:', { audioUrl, fileName, userId, fileSize });
-      
-      // Import invokeEdgeFunction dynamically to prevent circular dependencies
-      const { invokeEdgeFunction } = await import('@/integrations/supabase/client');
-      
       // Add request timestamp and client info to help with debugging CORS issues
       const payload = {
         audioUrl,
@@ -178,10 +194,25 @@ export class AudioService {
       
       console.log('Enhanced payload for edge function:', payload);
       
-      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', payload);
+      // Call the Edge Function using the Supabase SDK
+      const { data, error } = await supabase.functions.invoke<TranscriptionResult>(
+        'process-audio',
+        {
+          body: payload
+        }
+      );
       
-      console.log('Edge function response:', result);
-      return result;
+      if (error) {
+        console.error('Edge function error:', error);
+        throw new Error(`Edge function error: ${error.message}`);
+      }
+      
+      if (!data) {
+        throw new Error('Empty response from edge function');
+      }
+      
+      console.log('Edge function response:', data);
+      return data;
     } catch (error) {
       console.error('Edge function error:', error);
       
