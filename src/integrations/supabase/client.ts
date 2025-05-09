@@ -113,58 +113,88 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           'X-Client-Origin': window.location.origin,
           'X-Client-Info': navigator.userAgent
         };
-        
+
         // First check if the function exists by doing a simple OPTIONS request
         try {
-          // Invoke the Edge Function
-          const { data, error } = await supabase.functions.invoke<T>(functionName, {
-            body: enhancedPayload,
-            headers: additionalHeaders
-          });
+          console.log(`Checking if edge function ${functionName} exists...`);
           
-          // Clear timeout since the request completed
-          clearTimeout(timeoutId);
-          
-          if (error) {
-            console.error(`Error invoking ${functionName}:`, error);
+          try {
+            // Use fetch to check if the function exists with an OPTIONS request
+            const checkUrl = `${SUPABASE_URL}/functions/v1/${functionName}`;
+            const checkResponse = await fetch(checkUrl, {
+              method: 'OPTIONS',
+              headers: {
+                'Origin': window.location.origin,
+              },
+            });
             
-            // Enhanced error logging for debugging
-            console.error('Edge Function Error Details:', JSON.stringify(error, null, 2));
-            console.error('Client origin:', window.location.origin);
-            console.error('Browser details:', navigator.userAgent);
-            
-            // Extract specific error properties if they exist
-            if ('message' in error) console.error('Error message:', (error as any).message);
-            if ('status' in error) console.error('Status code:', (error as any).status);
-            if ('data' in error) console.error('Error data:', (error as any).data);
-            
-            // Check specifically for 404 errors
-            if ('status' in error && (error as any).status === 404) {
+            // If the check fails, log the details
+            if (!checkResponse.ok && checkResponse.status === 404) {
+              console.error(`Edge function ${functionName} not found (HTTP 404)`);
               reject(new Error(`Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`));
+              clearTimeout(timeoutId);
+              return;
+            }
+          } catch (checkError) {
+            // If the OPTIONS check fails with a network error, we still try the actual invocation
+            console.warn(`Pre-check for function ${functionName} failed, but will attempt invocation anyway:`, checkError);
+          }
+          
+          // Invoke the Edge Function
+          try {
+            console.log(`Invoking ${functionName} edge function...`);
+            
+            const { data, error } = await supabase.functions.invoke<T>(functionName, {
+              body: enhancedPayload,
+              headers: additionalHeaders
+            });
+            
+            // Clear timeout since the request completed
+            clearTimeout(timeoutId);
+            
+            if (error) {
+              // Enhanced error logging and handling
+              console.error(`Error invoking ${functionName}:`, error);
+              
+              // Extract error details for better diagnostics
+              let errorMessage = `Error calling ${functionName}`;
+              
+              if ('message' in error && typeof (error as any).message === 'string') {
+                errorMessage = (error as any).message;
+                
+                // Check for specific error patterns
+                if (errorMessage.includes('net::ERR_FAILED') || 
+                    errorMessage.includes('Failed to fetch') || 
+                    errorMessage.includes('NetworkError')) {
+                  errorMessage = `Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`;
+                }
+                else if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+                  errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
+                }
+                else if (errorMessage.includes('404') || errorMessage.toLowerCase().includes('not found')) {
+                  errorMessage = `Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`;
+                }
+              } 
+              
+              reject(new Error(errorMessage));
               return;
             }
             
-            // Extract user-friendly error message if possible
-            let errorMessage = `Error calling ${functionName}`;
-            if ('message' in error && typeof (error as any).message === 'string') {
-              errorMessage = (error as any).message;
-              
-              // Check for CORS errors specifically
-              if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
-                errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
-              }
-            } else if ('error' in error && typeof (error as any).error === 'string') {
-              errorMessage = (error as any).error;
-            } else if ('error' in error && typeof (error as any).error === 'object' && (error as any).error && 'message' in (error as any).error) {
-              errorMessage = (error as any).error.message;
-            }
+            console.log(`Edge function ${functionName} response:`, data);
+            resolve(data);
+          } catch (invocationError) {
+            console.error(`Exception during invocation of ${functionName}:`, invocationError);
             
-            reject(new Error(errorMessage));
-            return;
+            // Special handling for low-level network errors
+            const errorString = String(invocationError);
+            if (errorString.includes('net::ERR_FAILED') || 
+                errorString.includes('Failed to fetch') || 
+                errorString.includes('NetworkError')) {
+              reject(new Error(`Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`));
+            } else {
+              reject(invocationError);
+            }
           }
-          
-          console.log(`Edge function ${functionName} response:`, data);
-          resolve(data);
         } catch (error) {
           clearTimeout(timeoutId);
           reject(error);
@@ -179,8 +209,20 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
   } catch (error) {
     console.error(`Exception invoking ${functionName}:`, error);
     
-    // Specific CORS error detection
+    // Enhanced error detection for better user feedback
     const errorString = String(error);
+    
+    // Specific network error detection
+    if (errorString.includes('net::ERR_FAILED') || 
+        errorString.includes('Failed to fetch') || 
+        errorString.includes('NetworkError')) {
+      console.error('Network error detected in edge function invocation');
+      console.error('Client origin:', window.location.origin);
+      console.error('Requested function:', functionName);
+      throw new Error(`Network error calling ${functionName}. This likely means the function is not deployed or there's a server configuration issue. Please check the Supabase dashboard to verify the function is deployed.`);
+    }
+    
+    // Specific CORS error detection
     if (errorString.includes('CORS') || errorString.includes('cross-origin')) {
       console.error('CORS error detected in edge function invocation');
       console.error('Client origin:', window.location.origin);
@@ -201,3 +243,4 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     throw new Error(errorMessage);
   }
 };
+

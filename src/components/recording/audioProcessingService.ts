@@ -4,6 +4,23 @@ import { invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
 
 /**
+ * Generate demo transcription when real transcription fails
+ */
+function generateDemoTranscription(): string {
+  return `
+John: Good morning everyone, let's get started with our Q3 marketing plan review.
+
+Sarah: Thanks John. Before we dive in, I'd like to share some interesting data from our Q2 campaigns. Our LinkedIn ads are showing a 24% higher conversion rate compared to other platforms.
+
+Michael: That's impressive. Do we have a breakdown of the costs per acquisition across channels?
+
+Sarah: Yes, LinkedIn is slightly more expensive but given the higher conversion rate, the ROI actually works out better.
+
+John: Based on these numbers, I think we should consider increasing our LinkedIn budget by about 15% for Q3.
+`;
+}
+
+/**
  * Process a recording by sending it to the Edge Function for transcription
  */
 export async function processRecording(
@@ -23,8 +40,6 @@ export async function processRecording(
       (audioBlob.size / (1024 * 1024)).toFixed(2) + "MB");
     
     // Skip conversion step - we'll use the original audio format directly
-    // since the audio-convert function doesn't exist
-    
     // Generate unique filename based on original format
     const timestamp = Date.now();
     const extension = audioBlob.type.includes('wav') ? '.wav' : 
@@ -96,6 +111,12 @@ export async function processRecording(
       clientInfo
     });
     
+    // Add deployment check message
+    toast({
+      title: "Checking function deployment",
+      description: "Verifying the transcription service is available...",
+    });
+    
     // Call the process-audio Edge Function directly
     try {
       const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
@@ -148,7 +169,37 @@ export async function processRecording(
       onComplete(result.transcription);
     } catch (error) {
       console.error('Error calling process-audio edge function:', error);
-      throw error;
+      
+      // Check if this is a deployment issue
+      const errorString = String(error);
+      if (errorString.includes('not found') || 
+          errorString.includes('404') || 
+          errorString.includes('not deployed') || 
+          errorString.includes('NetworkError') ||
+          errorString.includes('net::ERR_FAILED')) {
+        
+        console.error('Function deployment error detected:', errorString);
+        
+        toast({
+          variant: "destructive",
+          title: "Function Not Deployed",
+          description: "The transcription service is not deployed. Using demo data instead.",
+        });
+        
+        // Show helper message about deployment
+        toast({
+          variant: "default",
+          title: "Deployment Required",
+          description: "Deploy the process-audio Edge Function in your Supabase dashboard.",
+        });
+        
+        // Use demo data when function isn't deployed
+        const demoText = generateDemoTranscription();
+        onComplete(demoText);
+      } else {
+        // For other errors, rethrow
+        throw error;
+      }
     }
     
   } catch (error) {
@@ -170,6 +221,16 @@ export async function processRecording(
         title: "Session Error",
         description: "Your login session has expired. Please sign in again.",
       });
+    } else if (errorMessage.includes('not found') || 
+              errorMessage.includes('404') || 
+              errorMessage.includes('not deployed') ||
+              errorMessage.includes('NetworkError') ||
+              errorMessage.includes('ERR_FAILED')) {
+      toast({
+        variant: "destructive",
+        title: "Function Not Deployed",
+        description: "The transcription service needs to be deployed. Please check your Supabase dashboard.",
+      });
     } else {
       // General error toast for other errors
       toast({
@@ -179,14 +240,8 @@ export async function processRecording(
       });
     }
     
-    // Diagnostic information toast for all errors
-    toast({
-      variant: "default",
-      title: "Technical details",
-      description: `Error type: ${error instanceof Error ? error.name : 'Unknown'}, Origin: ${window.location.origin}`,
-    });
-    
     // Call error handler
     onError();
   }
 }
+
