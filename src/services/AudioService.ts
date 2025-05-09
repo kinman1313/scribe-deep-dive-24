@@ -1,4 +1,3 @@
-
 import { supabase, checkAuthSession } from '@/integrations/supabase/client';
 import { TranscriptionResult } from '@/components/recording/types';
 import { logError, formatErrorMessage } from '@/utils/errorLogger';
@@ -164,21 +163,37 @@ export class AudioService {
       // Import invokeEdgeFunction dynamically to prevent circular dependencies
       const { invokeEdgeFunction } = await import('@/integrations/supabase/client');
       
-      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
+      // Add request timestamp and client info to help with debugging CORS issues
+      const payload = {
         audioUrl,
         fileName,
         userId,
-        fileSize
-      });
+        fileSize,
+        clientInfo: {
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          origin: window.location.origin
+        }
+      };
+      
+      console.log('Enhanced payload for edge function:', payload);
+      
+      const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', payload);
       
       console.log('Edge function response:', result);
       return result;
     } catch (error) {
       console.error('Edge function error:', error);
       
-      // Enhanced error handling
+      // Enhanced error handling with CORS-specific detection
       if (error instanceof Error) {
         const errorMessage = error.message;
+        
+        // Check specifically for CORS errors
+        if (errorMessage.includes('blocked by CORS') || errorMessage.includes('CORS policy')) {
+          console.error('CORS error detected:', errorMessage);
+          throw new Error('Cross-origin request blocked. Please check server CORS configuration.');
+        }
         
         if (errorMessage.includes('auth') || errorMessage.includes('Authentication')) {
           throw new Error('Authentication error: Please sign out and back in to refresh your session');

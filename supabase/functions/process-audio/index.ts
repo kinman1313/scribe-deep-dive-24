@@ -4,9 +4,9 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2'
 
-// Define CORS headers with explicit allowed origins
+// Enhanced CORS headers with explicit allowed origins and methods
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',  // More restrictive in production
+  'Access-Control-Allow-Origin': '*',  // Allow all origins
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Max-Age': '86400', // 24 hours caching of preflight requests
@@ -24,6 +24,11 @@ interface RequestPayload {
   fileName: string
   userId: string
   fileSize?: number
+  clientInfo?: {
+    timestamp: string
+    userAgent: string
+    origin: string
+  }
   sessionInfo?: {
     userId: string
     hasSession: boolean
@@ -53,14 +58,17 @@ serve(async (req) => {
   const requestId = crypto.randomUUID();
   console.log(`[${requestId}] Process audio function called [${new Date().toISOString()}]`);
   
-  // Handle CORS preflight requests - must return 200 status
+  // Handle CORS preflight requests - MUST return 200 status
   if (req.method === 'OPTIONS') {
-    console.log(`[${requestId}] Handling CORS preflight request for process-audio`);
+    console.log(`[${requestId}] ✅ Handling CORS preflight request for process-audio`);
     return new Response(null, { 
-      status: 200, 
+      status: 200, // Explicitly use 200 (not 204) for wider browser compatibility
       headers: corsHeaders 
     });
   }
+  
+  console.log(`[${requestId}] Request method: ${req.method}`);
+  console.log(`[${requestId}] Request headers:`, Object.fromEntries(req.headers.entries()));
   
   try {
     // Check auth header
@@ -83,6 +91,11 @@ serve(async (req) => {
       console.log(`[${requestId}] Request payload received with properties:`, Object.keys(requestData));
       console.log(`[${requestId}] Audio URL: ${requestData.audioUrl?.substring(0, 50)}...`);
       console.log(`[${requestId}] File name: ${requestData.fileName}`);
+      
+      // Log client info if available
+      if (requestData.clientInfo) {
+        console.log(`[${requestId}] Client info:`, requestData.clientInfo);
+      }
     } catch (parseError) {
       console.error(`[${requestId}] Error parsing request body:`, parseError);
       return createJsonResponse({

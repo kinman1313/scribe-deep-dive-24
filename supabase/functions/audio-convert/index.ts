@@ -1,4 +1,3 @@
-
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -7,9 +6,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2';
 import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
 import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
 
-// Define CORS headers with explicit allowed origins
+// Enhanced CORS headers with explicit allowed origins
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',  // More restrictive in production
+  'Access-Control-Allow-Origin': '*',  // Allow all origins
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Max-Age': '86400', // 24 hours caching of preflight requests
@@ -24,17 +23,19 @@ serve(async (req) => {
   // Add request tracking ID for correlating logs
   const requestId = crypto.randomUUID();
   
-  // Handle CORS preflight requests - must return 200 status
+  // Handle CORS preflight requests - MUST return 200 status for better compatibility
   if (req.method === 'OPTIONS') {
-    console.log(`[${requestId}] Handling CORS preflight request`);
+    console.log(`[${requestId}] ✅ Handling CORS preflight request`);
     return new Response(null, { 
-      status: 200, 
+      status: 200, // Use 200 instead of 204 for wider browser compatibility
       headers: corsHeaders 
     });
   }
   
-  // Set up basic logging for troubleshooting
+  // Log request details for debugging
   console.log(`[${requestId}] Audio convert function called [${new Date().toISOString()}]`);
+  console.log(`[${requestId}] Request method: ${req.method}`);
+  console.log(`[${requestId}] Request headers:`, Object.fromEntries(req.headers.entries()));
   
   try {
     // Check auth header

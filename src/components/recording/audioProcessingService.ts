@@ -19,12 +19,22 @@ async function convertToWAV(audioBlob: Blob): Promise<Blob> {
     
     // Call the audio-convert Edge Function
     const { supabase } = await import('@/integrations/supabase/client');
+    
+    console.log("Calling audio-convert edge function with formData containing audioFile...");
+    
     const { data: conversionResult, error: conversionError } = await supabase.functions.invoke('audio-convert', {
       body: formData,
     });
     
     if (conversionError) {
       console.error("Error converting audio:", conversionError);
+      
+      // Check specifically for CORS-related errors
+      if (conversionError.message?.includes('CORS') || conversionError.message?.includes('cross-origin')) {
+        console.error("CORS error detected:", conversionError.message);
+        throw new Error(`CORS error: ${conversionError.message}. Please check server configuration.`);
+      }
+      
       throw new Error(`Conversion failed: ${conversionError.message || 'Unknown error'}`);
     }
     
@@ -126,13 +136,21 @@ export async function processRecording(
       throw new Error('Failed to get file URL');
     }
     
-    // Call Edge Function with session info for debugging
+    // Call Edge Function with enhanced client information for debugging
+    const clientInfo = {
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      origin: window.location.origin,
+      pathname: window.location.pathname
+    };
+    
     console.log("Invoking edge function process-audio with:", {
       audioUrl: urlData.publicUrl,
       fileName,
       userId,
       fileSize: processedBlob.size,
-      sessionInfo
+      sessionInfo,
+      clientInfo
     });
     
     // Set a longer timeout for the edge function call
@@ -141,7 +159,8 @@ export async function processRecording(
       fileName,
       userId,
       fileSize: processedBlob.size,
-      sessionInfo
+      sessionInfo,
+      clientInfo
     });
     
     console.log("Edge function response received:", result);
@@ -187,12 +206,22 @@ export async function processRecording(
   } catch (error) {
     console.error('Error in processRecording:', error);
     
-    // Show detailed error message
-    toast({
-      variant: "destructive",
-      title: "Transcription failed",
-      description: error instanceof Error ? error.message : "An unknown error occurred during transcription",
-    });
+    // Check specifically for CORS errors
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+      toast({
+        variant: "destructive",
+        title: "CORS Error",
+        description: "The server blocked the request. This might be a temporary issue. Please try again later.",
+      });
+    } else {
+      // Show detailed error message for other errors
+      toast({
+        variant: "destructive",
+        title: "Transcription failed",
+        description: errorMessage || "An unknown error occurred during transcription",
+      });
+    }
     
     // Additional troubleshooting toast with common fixes
     toast({
