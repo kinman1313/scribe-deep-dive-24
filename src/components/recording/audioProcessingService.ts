@@ -1,4 +1,3 @@
-
 import { toast } from '@/components/ui/use-toast';
 import { invokeEdgeFunction } from '@/integrations/supabase/client';
 import { TranscriptionResult } from './types';
@@ -25,13 +24,18 @@ async function convertToWAV(audioBlob: Blob): Promise<Blob> {
     };
     console.log("Origin information for CORS debugging:", originInfo);
     
-    // Call the audio-convert Edge Function
+    // Call the audio-convert Edge Function directly with formData
     const { supabase } = await import('@/integrations/supabase/client');
     
     console.log("Calling audio-convert edge function with formData containing audioFile...");
     
+    // Add custom headers to help with CORS debugging
     const { data: conversionResult, error: conversionError } = await supabase.functions.invoke('audio-convert', {
       body: formData,
+      headers: {
+        'X-Client-Origin': window.location.origin,
+        'X-Client-Info': navigator.userAgent
+      }
     });
     
     if (conversionError) {
@@ -46,7 +50,9 @@ async function convertToWAV(audioBlob: Blob): Promise<Blob> {
         errorMessage.includes('preflight')
       ) {
         console.error("CORS error detected:", errorMessage);
-        throw new Error(`CORS policy error: ${errorMessage}. This is likely a server configuration issue. Please check the Edge Function logs.`);
+        console.error("Client origin:", window.location.origin);
+        console.error("User agent:", navigator.userAgent);
+        throw new Error(`CORS policy error: ${errorMessage}. This is likely a server configuration issue. Please try again in a few minutes.`);
       }
       
       throw new Error(`Conversion failed: ${conversionError.message || 'Unknown error'}`);

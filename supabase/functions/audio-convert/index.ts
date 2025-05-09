@@ -1,3 +1,4 @@
+
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -6,13 +7,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.43.2';
 import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
 import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
 
-// Enhanced CORS headers with explicit allowed origins
+// Enhanced CORS headers with explicit allowed origins and more headers
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',  // Allow all origins
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Origin': '*',  // Allow all origins for now
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range, x-client-origin',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Max-Age': '86400', // 24 hours caching of preflight requests
   'Access-Control-Allow-Credentials': 'true',
+  'Vary': 'Origin', // Important for caching responses per origin
 };
 
 // Environment variables
@@ -23,11 +25,11 @@ serve(async (req) => {
   // Add request tracking ID for correlating logs
   const requestId = crypto.randomUUID();
   
-  // Handle CORS preflight requests - MUST return 200 status for better compatibility
+  // Enhanced CORS handling - CRITICAL: Must return 200 status for OPTIONS
   if (req.method === 'OPTIONS') {
-    console.log(`[${requestId}] ✅ Handling CORS preflight request`);
+    console.log(`[${requestId}] ✅ Handling CORS preflight request from origin: ${req.headers.get('origin') || 'unknown'}`);
     return new Response(null, { 
-      status: 200, // Use 200 instead of 204 for wider browser compatibility
+      status: 200, // Must use 200 for preflight for wider browser compatibility
       headers: corsHeaders 
     });
   }
@@ -288,7 +290,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         error: 'Audio conversion failed',
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
+        requestId: requestId
       }),
       { 
         status: 500, 

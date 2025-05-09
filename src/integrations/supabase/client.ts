@@ -85,7 +85,8 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
         origin: window.location.origin,
         host: window.location.host,
         href: window.location.href,
-        clientTimestamp: new Date().toISOString()
+        clientTimestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent
       },
       sessionInfo: {
         userId: authData?.session?.user?.id,
@@ -126,6 +127,8 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           
           // Enhanced error logging for debugging
           console.error('Edge Function Error Details:', JSON.stringify(error, null, 2));
+          console.error('Client origin:', window.location.origin);
+          console.error('Browser details:', navigator.userAgent);
           
           // Extract specific error properties if they exist
           if ('message' in error) console.error('Error message:', (error as any).message);
@@ -136,6 +139,11 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           let errorMessage = `Error calling ${functionName}`;
           if ('message' in error && typeof (error as any).message === 'string') {
             errorMessage = (error as any).message;
+            
+            // Check for CORS errors specifically
+            if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+              errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
+            }
           } else if ('error' in error && typeof (error as any).error === 'string') {
             errorMessage = (error as any).error;
           } else if ('error' in error && typeof (error as any).error === 'object' && (error as any).error && 'message' in (error as any).error) {
@@ -164,7 +172,7 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
       console.error('CORS error detected in edge function invocation');
       console.error('Client origin:', window.location.origin);
       console.error('Requested function:', functionName);
-      throw new Error(`CORS error calling ${functionName}. This is likely a server configuration issue.`);
+      throw new Error(`CORS error calling ${functionName}. This is likely a server configuration issue. Please try again later.`);
     }
     
     // Extract error details for better user feedback
