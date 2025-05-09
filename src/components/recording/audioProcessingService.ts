@@ -44,6 +44,11 @@ export async function processRecording(
     
     console.log("Auth session check:", sessionInfo);
     
+    // Check if session is valid
+    if (!session || !session.user) {
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+    
     // Upload the file to Supabase Storage
     const filePath = `${userId}/${fileName}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -51,8 +56,11 @@ export async function processRecording(
       .upload(filePath, audioBlob);
       
     if (uploadError) {
+      console.error("Storage upload error:", uploadError);
       throw new Error(`Upload failed: ${uploadError.message}`);
     }
+    
+    console.log("File uploaded successfully:", uploadData);
     
     // Get file URL
     const { data: urlData } = supabase.storage
@@ -81,6 +89,8 @@ export async function processRecording(
       sessionInfo
     });
     
+    console.log("Edge function response received:", result);
+    
     if (!result) {
       throw new Error('Empty result from edge function');
     }
@@ -105,7 +115,7 @@ export async function processRecording(
       console.warn("Using mock transcription data:", result.message);
       toast({
         title: "OpenAI API Issue",
-        description: "Could not connect to OpenAI. Please check your API key and try again.",
+        description: "Using mock data. Please check if your OpenAI API key is configured in Supabase Edge Function Secrets.",
         variant: "destructive"
       });
     } else {
@@ -122,11 +132,18 @@ export async function processRecording(
   } catch (error) {
     console.error('Error in processRecording:', error);
     
-    // Show error message
+    // Show detailed error message
     toast({
       variant: "destructive",
-      title: "Processing error",
-      description: error instanceof Error ? error.message : "An unknown error occurred",
+      title: "Transcription failed",
+      description: error instanceof Error ? error.message : "An unknown error occurred during transcription",
+    });
+    
+    // Additional troubleshooting toast with common fixes
+    toast({
+      variant: "default",
+      title: "Troubleshooting tips",
+      description: "Check if your OpenAI API key is set in Supabase Edge Function Secrets. Try a shorter recording or refresh your login session.",
     });
     
     // Call error handler
