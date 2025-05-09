@@ -117,6 +117,33 @@ export async function processRecording(
       description: "Verifying the transcription service is available...",
     });
     
+    // Direct test of the Edge Function endpoint to check connectivity
+    try {
+      const testEndpoint = `${supabase.supabaseUrl}/functions/v1/process-audio`;
+      console.log(`Testing direct access to Edge Function at: ${testEndpoint}`);
+      
+      const testResponse = await fetch(testEndpoint, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin
+        }
+      });
+      
+      console.log("Edge Function connectivity test results:", {
+        status: testResponse.status,
+        statusText: testResponse.statusText,
+        ok: testResponse.ok,
+        headers: Object.fromEntries(testResponse.headers.entries()),
+        url: testResponse.url
+      });
+      
+      if (!testResponse.ok) {
+        console.warn("Edge Function direct access test failed. This may indicate deployment or CORS issues.");
+      }
+    } catch (testError) {
+      console.error("Edge Function connectivity test error:", testError);
+    }
+    
     // Call the process-audio Edge Function directly
     try {
       const result = await invokeEdgeFunction<TranscriptionResult>('process-audio', {
@@ -169,6 +196,7 @@ export async function processRecording(
       onComplete(result.transcription);
     } catch (error) {
       console.error('Error calling process-audio edge function:', error);
+      console.log('Full error details:', error);
       
       // Check if this is a deployment issue
       const errorString = String(error);
@@ -182,15 +210,15 @@ export async function processRecording(
         
         toast({
           variant: "destructive",
-          title: "Function Not Deployed",
-          description: "The transcription service is not deployed. Using demo data instead.",
+          title: "Edge Function Connectivity Issue",
+          description: "Cannot reach the transcription service. This could be due to CORS, network issues, or function deployment problems.",
         });
         
         // Show helper message about deployment
         toast({
           variant: "default",
-          title: "Deployment Required",
-          description: "Deploy the process-audio Edge Function in your Supabase dashboard.",
+          title: "Troubleshooting Steps",
+          description: "1. Check if the function is deployed in Supabase. 2. Check for CORS settings. 3. Check browser console for specific errors.",
         });
         
         // Use demo data when function isn't deployed
@@ -228,8 +256,15 @@ export async function processRecording(
               errorMessage.includes('ERR_FAILED')) {
       toast({
         variant: "destructive",
-        title: "Function Not Deployed",
-        description: "The transcription service needs to be deployed. Please check your Supabase dashboard.",
+        title: "Edge Function Error",
+        description: "Cannot reach the transcription service. Using demo data instead.",
+      });
+      
+      // Show a more detailed message with possible solutions
+      toast({
+        variant: "default",
+        title: "Possible Solutions",
+        description: "Try redeploying the function, checking CORS settings in Supabase, or restarting your browser.",
       });
     } else {
       // General error toast for other errors
@@ -244,4 +279,3 @@ export async function processRecording(
     onError();
   }
 }
-

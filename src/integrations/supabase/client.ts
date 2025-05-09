@@ -97,6 +97,38 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     
     console.log(`Invoking edge function ${functionName} with:`, enhancedPayload);
     
+    // First try direct fetch to check if the function is accessible
+    // This can help identify network vs. function issues
+    try {
+      console.log("Testing direct access to edge function...");
+      const testUrl = `${SUPABASE_URL}/functions/v1/${functionName}`;
+      
+      // Log the exact URL we're trying to access
+      console.log(`Attempting to access: ${testUrl}`);
+      
+      // Just do an OPTIONS request to check connectivity
+      const testResponse = await fetch(testUrl, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin,
+        }
+      });
+      
+      console.log("Direct edge function access test result:", {
+        status: testResponse.status,
+        statusText: testResponse.statusText,
+        headers: Object.fromEntries(testResponse.headers.entries()),
+        ok: testResponse.ok
+      });
+    } catch (testError) {
+      // Log the error but don't throw, as this is just a test
+      console.error("Edge function direct access test failed:", testError);
+      console.log("This could indicate a network connectivity issue or CORS problem");
+    }
+
+    // Try the actual invocation through Supabase client
+    console.log(`Now trying official invocation of ${functionName} via Supabase client...`);
+    
     // Create promise with timeout
     const functionPromise = new Promise<T>(async (resolve, reject) => {
       try {
@@ -114,98 +146,118 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
           'X-Client-Info': navigator.userAgent
         };
 
-        // First check if the function exists by doing a simple OPTIONS request
+        // Invoke the Edge Function
         try {
-          console.log(`Checking if edge function ${functionName} exists...`);
+          console.log(`Invoking ${functionName} edge function...`);
           
-          try {
-            // Use fetch to check if the function exists with an OPTIONS request
-            const checkUrl = `${SUPABASE_URL}/functions/v1/${functionName}`;
-            const checkResponse = await fetch(checkUrl, {
-              method: 'OPTIONS',
-              headers: {
-                'Origin': window.location.origin,
-              },
-            });
-            
-            // If the check fails, log the details
-            if (!checkResponse.ok && checkResponse.status === 404) {
-              console.error(`Edge function ${functionName} not found (HTTP 404)`);
-              reject(new Error(`Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`));
-              clearTimeout(timeoutId);
-              return;
-            }
-          } catch (checkError) {
-            // If the OPTIONS check fails with a network error, we still try the actual invocation
-            console.warn(`Pre-check for function ${functionName} failed, but will attempt invocation anyway:`, checkError);
-          }
+          // Try the official Supabase method first
+          const { data, error } = await supabase.functions.invoke<T>(functionName, {
+            body: enhancedPayload,
+            headers: additionalHeaders
+          });
           
-          // Invoke the Edge Function
-          try {
-            console.log(`Invoking ${functionName} edge function...`);
-            
-            const { data, error } = await supabase.functions.invoke<T>(functionName, {
-              body: enhancedPayload,
-              headers: additionalHeaders
-            });
-            
-            // Clear timeout since the request completed
-            clearTimeout(timeoutId);
-            
-            if (error) {
-              // Enhanced error logging and handling
-              console.error(`Error invoking ${functionName}:`, error);
-              
-              // Extract error details for better diagnostics
-              let errorMessage = `Error calling ${functionName}`;
-              
-              if ('message' in error && typeof (error as any).message === 'string') {
-                errorMessage = (error as any).message;
-                
-                // Check for specific error patterns
-                if (errorMessage.includes('net::ERR_FAILED') || 
-                    errorMessage.includes('Failed to fetch') || 
-                    errorMessage.includes('NetworkError')) {
-                  errorMessage = `Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`;
-                }
-                else if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
-                  errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
-                }
-                else if (errorMessage.includes('404') || errorMessage.toLowerCase().includes('not found')) {
-                  errorMessage = `Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`;
-                }
-              } 
-              
-              reject(new Error(errorMessage));
-              return;
-            }
-            
-            console.log(`Edge function ${functionName} response:`, data);
-            resolve(data);
-          } catch (invocationError) {
-            console.error(`Exception during invocation of ${functionName}:`, invocationError);
-            
-            // Special handling for low-level network errors
-            const errorString = String(invocationError);
-            if (errorString.includes('net::ERR_FAILED') || 
-                errorString.includes('Failed to fetch') || 
-                errorString.includes('NetworkError')) {
-              reject(new Error(`Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`));
-            } else {
-              reject(invocationError);
-            }
-          }
-        } catch (error) {
+          // Clear timeout since the request completed
           clearTimeout(timeoutId);
-          reject(error);
+          
+          if (error) {
+            // Enhanced error logging and handling
+            console.error(`Error invoking ${functionName}:`, error);
+            
+            // Extract error details for better diagnostics
+            let errorMessage = `Error calling ${functionName}`;
+            
+            if ('message' in error && typeof (error as any).message === 'string') {
+              errorMessage = (error as any).message;
+              
+              // Check for specific error patterns
+              if (errorMessage.includes('net::ERR_FAILED') || 
+                  errorMessage.includes('Failed to fetch') || 
+                  errorMessage.includes('NetworkError')) {
+                errorMessage = `Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`;
+              }
+              else if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+                errorMessage = `CORS error calling ${functionName}. Please ensure the function is deployed and configured correctly.`;
+              }
+              else if (errorMessage.includes('404') || errorMessage.toLowerCase().includes('not found')) {
+                errorMessage = `Edge function ${functionName} not found (404). Please verify the function is correctly deployed to your Supabase project.`;
+              }
+            } 
+            
+            reject(new Error(errorMessage));
+            return;
+          }
+          
+          console.log(`Edge function ${functionName} response:`, data);
+          resolve(data);
+        } catch (invocationError) {
+          clearTimeout(timeoutId);
+          console.error(`Exception during invocation of ${functionName}:`, invocationError);
+          
+          // Special handling for low-level network errors
+          const errorString = String(invocationError);
+          if (errorString.includes('net::ERR_FAILED') || 
+              errorString.includes('Failed to fetch') || 
+              errorString.includes('NetworkError')) {
+            reject(new Error(`Network error calling ${functionName}. This may indicate the function is not deployed or there is a server configuration issue. Check the Supabase dashboard to verify the function is deployed.`));
+          } else {
+            reject(invocationError);
+          }
         }
       } catch (error) {
         reject(error);
       }
     });
     
-    // Execute the promise
-    return await functionPromise;
+    // When all else fails, try a direct fetch as a last resort
+    try {
+      const result = await functionPromise;
+      return result;
+    } catch (supabaseError) {
+      console.error("Supabase client invocation failed:", supabaseError);
+      console.log("Attempting direct fetch as fallback...");
+      
+      try {
+        // Try direct fetch as a last resort
+        const directUrl = `${SUPABASE_URL}/functions/v1/${functionName}`;
+        console.log(`Attempting direct fetch to: ${directUrl}`);
+        
+        const { data: authData } = await supabase.auth.getSession();
+        const jwt = authData?.session?.access_token;
+        
+        if (!jwt) {
+          throw new Error("No access token available for direct function call");
+        }
+        
+        const directResponse = await fetch(directUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${jwt}`,
+            'Origin': window.location.origin
+          },
+          body: JSON.stringify(enhancedPayload)
+        });
+        
+        console.log("Direct fetch response:", {
+          status: directResponse.status,
+          statusText: directResponse.statusText,
+          headers: Object.fromEntries(directResponse.headers.entries())
+        });
+        
+        if (!directResponse.ok) {
+          const errorText = await directResponse.text();
+          throw new Error(`Direct fetch failed: ${directResponse.status} ${directResponse.statusText} - ${errorText}`);
+        }
+        
+        const directData = await directResponse.json();
+        console.log("Direct fetch successful:", directData);
+        return directData as T;
+      } catch (directError) {
+        console.error("Direct fetch also failed:", directError);
+        throw supabaseError; // Throw the original error
+      }
+    }
+    
   } catch (error) {
     console.error(`Exception invoking ${functionName}:`, error);
     
@@ -243,4 +295,3 @@ export const invokeEdgeFunction = async <T = any>(functionName: string, payload?
     throw new Error(errorMessage);
   }
 };
-
