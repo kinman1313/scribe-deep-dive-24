@@ -97,24 +97,27 @@ export async function processRecording(
       throw new Error('Empty transcription result');
     }
     
+    // Check if the transcription contains the mock data indicator
+    const isMockData = result.message && result.message.includes('mock data');
+    
     // Show a message if mock data was used (helpful for debugging)
-    if (result.message && result.message.includes('mock data')) {
+    if (isMockData) {
       console.warn("Using mock transcription data:", result.message);
       toast({
-        title: "Using mock transcription",
-        description: "Real transcription service unavailable. Using sample data.",
-        variant: "default"
+        title: "OpenAI API Issue",
+        description: "Could not connect to OpenAI. Please check your API key and try again.",
+        variant: "destructive"
+      });
+    } else {
+      // Success message for actual transcription
+      toast({
+        title: "Transcription complete",
+        description: "Your recording has been processed successfully.",
       });
     }
     
     // Call completion handler with actual transcription
     onComplete(result.transcription);
-    
-    // Show success message
-    toast({
-      title: "Transcription complete",
-      description: "Your recording has been processed successfully.",
-    });
     
   } catch (error) {
     console.error('Error in processRecording:', error);
