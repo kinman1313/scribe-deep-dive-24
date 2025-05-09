@@ -1,4 +1,3 @@
-
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -50,48 +49,53 @@ function createJsonResponse(body: unknown, status = 200) {
 }
 
 serve(async (req) => {
+  // Add request tracking ID for correlating logs
+  const requestId = crypto.randomUUID();
+  console.log(`[${requestId}] Process audio function called [${new Date().toISOString()}]`);
+  
   // Handle CORS preflight requests - must return 200 status
   if (req.method === 'OPTIONS') {
-    console.log('Handling CORS preflight request for process-audio');
+    console.log(`[${requestId}] Handling CORS preflight request for process-audio`);
     return new Response(null, { 
       status: 200, 
       headers: corsHeaders 
     });
   }
   
-  // Set up basic logging for troubleshooting
-  console.log(`Process audio function called [${new Date().toISOString()}]`);
-  
   try {
     // Check auth header
-    const authHeader = req.headers.get('Authorization')
+    const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      console.error("Missing Authorization header");
+      console.error(`[${requestId}] Missing Authorization header`);
       return createJsonResponse({ 
         error: 'Missing Authorization header',
         transcription: generateMockTranscription(),
         message: 'Using mock data due to missing authorization'
-      }, 200) // Return 200 with mock data instead of 401 error
+      }, 200);
     }
+    
+    console.log(`[${requestId}] Auth header present, proceeding with request parsing`);
     
     // Parse request payload - with robust error handling
     let requestData: RequestPayload;
     try {
       requestData = await req.json();
-      console.log("Request payload received with properties:", Object.keys(requestData));
+      console.log(`[${requestId}] Request payload received with properties:`, Object.keys(requestData));
+      console.log(`[${requestId}] Audio URL: ${requestData.audioUrl?.substring(0, 50)}...`);
+      console.log(`[${requestId}] File name: ${requestData.fileName}`);
     } catch (parseError) {
-      console.error("Error parsing request body:", parseError);
+      console.error(`[${requestId}] Error parsing request body:`, parseError);
       return createJsonResponse({
         error: 'Invalid JSON in request body',
         transcription: generateMockTranscription(),
         message: 'Using mock data due to JSON parsing error'
-      }, 200); // Return 200 with mock data instead of 400 error
+      }, 200);
     }
     
     // Validate required fields but don't fail the request
     const { audioUrl, fileName, userId } = requestData;
     if (!audioUrl || !fileName || !userId) {
-      console.error("Missing required fields in payload:", { 
+      console.error(`[${requestId}] Missing required fields in payload:`, { 
         hasAudioUrl: !!audioUrl, 
         hasFileName: !!fileName, 
         hasUserId: !!userId 
@@ -100,12 +104,12 @@ serve(async (req) => {
         error: 'Missing required fields',
         transcription: generateMockTranscription(),
         message: 'Using mock data due to missing required fields'
-      }, 200); // Return 200 with mock data instead of 400 error
+      }, 200);
     }
     
     // Check if OpenAI API key is configured and valid
     if (!OPENAI_API_KEY) {
-      console.error('OpenAI API key not configured in Edge Function secrets');
+      console.error(`[${requestId}] OpenAI API key not configured in Edge Function secrets`);
       return createJsonResponse({
         transcription: generateMockTranscription(),
         message: 'Using mock data (OpenAI API key not configured in Edge Function secrets)'
@@ -113,11 +117,11 @@ serve(async (req) => {
     } else {
       // Log first and last few characters of the key for debugging without exposing the full key
       const keyLength = OPENAI_API_KEY.length;
-      console.log(`OpenAI API key configured (length: ${keyLength}, starts with: ${OPENAI_API_KEY.slice(0, 3)}..., ends with: ...${OPENAI_API_KEY.slice(-3)})`);
+      console.log(`[${requestId}] OpenAI API key configured (length: ${keyLength}, starts with: ${OPENAI_API_KEY.slice(0, 3)}..., ends with: ...${OPENAI_API_KEY.slice(-3)})`);
       
       // Check if key starts with "sk-" which is the expected format for OpenAI keys
       if (!OPENAI_API_KEY.startsWith('sk-')) {
-        console.error('OpenAI API key does not appear to be in the valid format (should start with "sk-")');
+        console.error(`[${requestId}] OpenAI API key does not appear to be in the valid format (should start with "sk-")`);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data (OpenAI API key format appears invalid, should start with "sk-")'
@@ -127,7 +131,7 @@ serve(async (req) => {
     
     try {
       // Download the audio file with robust error handling
-      console.log('Attempting to download audio file from URL');
+      console.log(`[${requestId}] Attempting to download audio file from URL`);
       
       let audioResponse;
       try {
@@ -136,8 +140,11 @@ serve(async (req) => {
             'Authorization': authHeader
           }
         });
+        
+        console.log(`[${requestId}] Audio fetch response status:`, audioResponse.status);
+        console.log(`[${requestId}] Audio fetch headers:`, Object.fromEntries(audioResponse.headers.entries()));
       } catch (fetchError) {
-        console.error('Network error fetching audio:', fetchError);
+        console.error(`[${requestId}] Network error fetching audio:`, fetchError);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data due to network error fetching audio'
@@ -145,7 +152,16 @@ serve(async (req) => {
       }
       
       if (!audioResponse.ok) {
-        console.error(`Failed to fetch audio: ${audioResponse.status} ${audioResponse.statusText}`);
+        console.error(`[${requestId}] Failed to fetch audio: ${audioResponse.status} ${audioResponse.statusText}`);
+        
+        // Log response details for debugging
+        try {
+          const errorResponseText = await audioResponse.text();
+          console.error(`[${requestId}] Error response body:`, errorResponseText);
+        } catch (e) {
+          console.error(`[${requestId}] Could not read error response body`);
+        }
+        
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: `Using mock data (Failed to fetch audio: ${audioResponse.status})`
@@ -155,8 +171,9 @@ serve(async (req) => {
       let audioBlob;
       try {
         audioBlob = await audioResponse.blob();
+        console.log(`[${requestId}] Audio blob created, type:`, audioBlob.type);
       } catch (blobError) {
-        console.error('Error creating blob from response:', blobError);
+        console.error(`[${requestId}] Error creating blob from response:`, blobError);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data due to error processing audio data'
@@ -164,14 +181,14 @@ serve(async (req) => {
       }
       
       if (audioBlob.size === 0) {
-        console.error('Empty audio file downloaded');
+        console.error(`[${requestId}] Empty audio file downloaded`);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data (Empty audio file)'
         }, 200);
       }
       
-      console.log(`Audio file downloaded successfully, size: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+      console.log(`[${requestId}] Audio file downloaded successfully, size: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
       
       // Prepare audio file for OpenAI API
       const formData = new FormData();
@@ -181,13 +198,14 @@ serve(async (req) => {
       formData.append('response_format', 'json');
       
       // Call OpenAI API with timeout and proper error handling
-      console.log('Calling OpenAI transcription API with valid key');
+      console.log(`[${requestId}] Calling OpenAI transcription API with valid key`);
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
       
       let transcriptionResponse;
       try {
+        console.log(`[${requestId}] Sending request to OpenAI API - file size: ${audioBlob.size} bytes`);
         transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
           headers: {
@@ -198,9 +216,10 @@ serve(async (req) => {
         });
         
         clearTimeout(timeoutId); // Clear the timeout if request completes
+        console.log(`[${requestId}] OpenAI API response status:`, transcriptionResponse.status);
       } catch (apiError) {
         clearTimeout(timeoutId);
-        console.error('Error calling OpenAI API:', apiError);
+        console.error(`[${requestId}] Error calling OpenAI API:`, apiError);
         
         // Check if it was an abort error
         if (apiError instanceof Error && apiError.name === 'AbortError') {
@@ -221,9 +240,9 @@ serve(async (req) => {
         try {
           const errorData = await transcriptionResponse.text();
           errorText = errorData;
-          console.error(`OpenAI API error ${transcriptionResponse.status}: ${errorText}`);
+          console.error(`[${requestId}] OpenAI API error ${transcriptionResponse.status}: ${errorText}`);
         } catch (e) {
-          console.error(`OpenAI API error ${transcriptionResponse.status}, couldn't parse response`);
+          console.error(`[${requestId}] OpenAI API error ${transcriptionResponse.status}, couldn't parse response`);
         }
         
         return createJsonResponse({
@@ -235,8 +254,9 @@ serve(async (req) => {
       let transcriptionData;
       try {
         transcriptionData = await transcriptionResponse.json();
+        console.log(`[${requestId}] OpenAI response parsed successfully`);
       } catch (jsonError) {
-        console.error('Error parsing OpenAI response:', jsonError);
+        console.error(`[${requestId}] Error parsing OpenAI response:`, jsonError);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data due to error parsing OpenAI response'
@@ -244,7 +264,7 @@ serve(async (req) => {
       }
       
       if (!transcriptionData || !transcriptionData.text) {
-        console.error('Invalid response from OpenAI API:', transcriptionData);
+        console.error(`[${requestId}] Invalid response from OpenAI API:`, transcriptionData);
         return createJsonResponse({
           transcription: generateMockTranscription(),
           message: 'Using mock data due to invalid OpenAI response format'
@@ -252,13 +272,13 @@ serve(async (req) => {
       }
       
       // Return successful transcription
-      console.log('Successfully received transcription from OpenAI');
+      console.log(`[${requestId}] Successfully received transcription from OpenAI`);
       return createJsonResponse({
         transcription: transcriptionData.text
       }, 200);
       
     } catch (error) {
-      console.error('Unhandled error during transcription process:', error);
+      console.error(`[${requestId}] Unhandled error during transcription process:`, error);
       
       // Always return a response with mock data instead of letting the error bubble up
       return createJsonResponse({
@@ -267,7 +287,7 @@ serve(async (req) => {
       }, 200);
     }
   } catch (error) {
-    console.error('Unhandled top-level error in edge function:', error);
+    console.error(`[${requestId}] Unhandled top-level error in edge function:`, error);
     
     // Return mock data instead of error to keep the app working
     return createJsonResponse({
@@ -306,4 +326,3 @@ Sarah: Just a reminder that we need to finalize the budget allocation by next Mo
 
 John: Noted. Let's plan to wrap that up today if possible.
 `;
-}
