@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
 const Settings = () => {
   const { user } = useAuth();
