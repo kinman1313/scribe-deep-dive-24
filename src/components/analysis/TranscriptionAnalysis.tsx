@@ -9,6 +9,7 @@ import { SummaryTabContent } from './tabs/SummaryTabContent';
 import { ActionItemsTabContent } from './tabs/ActionItemsTabContent';
 import { TodoTabContent } from './tabs/TodoTabContent';
 import { InsightsTabContent } from './tabs/InsightsTabContent';
+import { QuestionsTabContent } from './tabs/QuestionsTabContent';
 import { useTranscriptionAnalysis } from '@/hooks/useTranscriptionAnalysis';
 
 interface TranscriptionAnalysisProps {
@@ -86,6 +87,13 @@ export function TranscriptionAnalysis({ transcription }: TranscriptionAnalysisPr
             <TabsContent value="insights" className="mt-0">
               <InsightsTabContent 
                 insights={insights} 
+                isAnalyzing={isAnalyzing} 
+              />
+            </TabsContent>
+            
+            <TabsContent value="questions" className="mt-0">
+              <QuestionsTabContent 
+                transcription={transcription}
                 isAnalyzing={isAnalyzing} 
               />
             </TabsContent>

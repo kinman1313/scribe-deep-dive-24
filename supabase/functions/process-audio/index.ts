@@ -1,4 +1,3 @@
-
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -21,11 +20,14 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 
 // Types
 interface RequestPayload {
-  audioUrl: string;
-  fileName: string;
-  userId: string;
+  audioUrl?: string;
+  fileName?: string;
+  userId?: string;
   fileSize?: number;
   analyze?: boolean; // Whether to run additional analysis
+  operation?: 'process-recording' | 'ask-question'; // Operation type
+  question?: string; // For ask-question operation
+  transcription?: string; // For ask-question operation
   clientInfo?: {
     timestamp: string;
     userAgent: string;
@@ -46,6 +48,7 @@ interface TranscriptionResult {
   keyPoints?: string[];
   error?: string;
   message?: string;
+  answer?: string; // For ask-question operation
 }
 
 interface Speaker {
@@ -106,6 +109,28 @@ serve(async (req) => {
     try {
       requestData = await req.json();
       console.log(`[${requestId}] Request payload received with properties:`, Object.keys(requestData));
+      
+      // Check which operation to perform
+      const operation = requestData.operation || 'process-recording';
+      console.log(`[${requestId}] Operation: ${operation}`);
+      
+      // For question answering
+      if (operation === 'ask-question') {
+        if (!requestData.question || !requestData.transcription) {
+          console.error(`[${requestId}] Missing question or transcription for ask-question operation`);
+          return createJsonResponse({
+            error: 'Missing question or transcription',
+            answer: 'I need both a question and a transcription to provide an answer.'
+          }, 400);
+        }
+        
+        console.log(`[${requestId}] Processing question: ${requestData.question?.substring(0, 50)}...`);
+        
+        // Answer the question using OpenAI
+        return await answerQuestion(requestData.question, requestData.transcription, requestId);
+      }
+      
+      // For audio processing
       console.log(`[${requestId}] Audio URL: ${requestData.audioUrl?.substring(0, 50)}...`);
       console.log(`[${requestId}] File name: ${requestData.fileName}`);
       console.log(`[${requestId}] Analyze: ${requestData.analyze || false}`);
@@ -123,6 +148,7 @@ serve(async (req) => {
       }, 200);
     }
     
+    // For traditional audio processing path
     // Validate required fields but don't fail the request
     const { audioUrl, fileName, userId, analyze = false } = requestData;
     if (!audioUrl || !fileName || !userId) {
@@ -490,5 +516,86 @@ async function analyzeTranscription(transcription: string, requestId: string) {
   } catch (error) {
     console.error(`[${requestId}] Error during transcription analysis:`, error);
     return defaultResult;
+  }
+}
+
+/**
+ * Answer a question about a transcription
+ */
+async function answerQuestion(question: string, transcription: string, requestId: string) {
+  console.log(`[${requestId}] Processing question about transcription`);
+  
+  if (!OPENAI_API_KEY) {
+    console.error(`[${requestId}] OpenAI API key not configured in Edge Function secrets`);
+    return createJsonResponse({
+      answer: "I'm sorry, but I don't have access to the AI service needed to answer your question."
+    }, 200);
+  }
+  
+  try {
+    console.log(`[${requestId}] Calling OpenAI to answer question`);
+    
+    // Create a structured prompt for question answering
+    const messages = [
+      {
+        role: "system",
+        content: `You are an AI assistant who helps answer questions about meeting transcripts. 
+        Use the provided transcript to give an accurate, helpful, and concise answer.
+        Focus only on information present in the transcript.
+        If the answer is not in the transcript, acknowledge this and provide general guidance.
+        Format your responses using markdown for better readability.`
+      },
+      {
+        role: "user",
+        content: `Here is the transcript of a meeting:
+
+${transcription}
+
+My question is: ${question}`
+      }
+    ];
+    
+    // Call OpenAI API for question answering
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: messages,
+        temperature: 0.2, // Lower temperature for more factual answers
+        max_tokens: 800
+      })
+    });
+    
+    if (!response.ok) {
+      console.error(`[${requestId}] OpenAI Q&A API error:`, response.status, response.statusText);
+      return createJsonResponse({
+        answer: "I'm sorry, but I encountered an error while processing your question. Please try again."
+      }, 200);
+    }
+    
+    const data = await response.json();
+    if (!data.choices || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
+      console.error(`[${requestId}] Invalid response from OpenAI Q&A:`, data);
+      return createJsonResponse({
+        answer: "I'm sorry, but I received an invalid response while processing your question. Please try again."
+      }, 200);
+    }
+    
+    const answer = data.choices[0].message.content;
+    console.log(`[${requestId}] Successfully generated answer for question`);
+    
+    return createJsonResponse({
+      answer: answer
+    }, 200);
+    
+  } catch (error) {
+    console.error(`[${requestId}] Error answering question:`, error);
+    return createJsonResponse({
+      answer: "I'm sorry, but an error occurred while processing your question. Please try again."
+    }, 200);
   }
 }
