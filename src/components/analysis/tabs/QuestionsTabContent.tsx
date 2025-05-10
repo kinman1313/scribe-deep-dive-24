@@ -6,6 +6,7 @@ import { Send } from 'lucide-react';
 import { AnalysisLoader } from '../utils/AnalysisLoader';
 import { MarkdownRenderer } from '../utils/MarkdownRenderer';
 import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/components/ui/use-toast';
 
 interface QuestionsTabContentProps {
   transcription: string;
@@ -19,6 +20,7 @@ interface Message {
 }
 
 export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTabContentProps) {
+  const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([
@@ -44,22 +46,36 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
     setIsLoading(true);
     
     try {
-      // Simulate AI response - in a real app this would call your OpenAI integration
-      // In a real implementation, we'd send the query and transcription to an AI service
-      setTimeout(() => {
-        const response = generateMockAIResponse(query, transcription);
-        
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          content: response,
-          role: 'assistant'
-        };
-        
-        setMessages(prev => [...prev, aiMessage]);
-        setIsLoading(false);
-      }, 1500);
+      // Call the Edge Function to get AI-powered answer
+      const response = await supabase.functions.invoke('process-audio', {
+        body: {
+          question: query,
+          transcription,
+          operation: 'ask-question'
+        }
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      const answer = response.data?.answer || "I couldn't generate an answer for your question.";
+      
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: answer,
+        role: 'assistant'
+      };
+      
+      setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
       console.error('Error getting answer:', error);
+      
+      toast({
+        variant: "destructive",
+        title: "Error getting answer",
+        description: "We couldn't process your question. Please try again.",
+      });
       
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -68,6 +84,7 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
       };
       
       setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -139,33 +156,4 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
       </div>
     </div>
   );
-}
-
-// Helper function to generate mock AI responses
-function generateMockAIResponse(query: string, transcription: string): string {
-  const lowerQuery = query.toLowerCase();
-  
-  // Handle common questions with tailored responses
-  if (lowerQuery.includes('summary') || lowerQuery.includes('summarize')) {
-    return `## Meeting Summary\n\nThis meeting focused on discussing project updates, upcoming deadlines, and resource allocation. The team went through the current sprint progress and identified several action items that need to be addressed before the end of the week.\n\nKey points included:\n- Project Alpha is on track for delivery by the end of the month\n- Resources need to be reallocated to support Project Beta\n- Client meeting scheduled for next Thursday needs preparation`;
-  }
-  
-  if (lowerQuery.includes('action') || lowerQuery.includes('todo')) {
-    return `## Action Items\n\nI found several action items mentioned in the meeting:\n\n1. **Complete the documentation** - Due by Friday\n2. **Schedule client demo** - By the end of week\n3. **Follow up with marketing team** - About the launch materials\n4. **Review pending pull requests** - By tomorrow\n\nYou can also check the Action Items tab for a more complete list.`;
-  }
-  
-  if (lowerQuery.includes('who') && (lowerQuery.includes('attended') || lowerQuery.includes('present'))) {
-    // Extract speaker names from transcription
-    const speakerMatches = transcription.match(/([A-Za-z]+):/g) || [];
-    const speakers = Array.from(new Set(speakerMatches.map(s => s.replace(':', ''))));
-    
-    return `## Meeting Participants\n\nThe following people participated in the meeting:\n\n${speakers.map(s => `- **${s}**`).join('\n')}\n\nThere were ${speakers.length} participants in total.`;
-  }
-  
-  if (lowerQuery.includes('decision') || lowerQuery.includes('decide')) {
-    return `## Key Decisions\n\nThe team made several important decisions during this meeting:\n\n1. **Technology Stack** - Agreed to use React with TypeScript for the frontend\n2. **Timeline Adjustment** - Extended the delivery date by two weeks\n3. **Resource Allocation** - Assigned two additional developers to Project X\n\nThese decisions were documented in the meeting minutes.`;
-  }
-  
-  // Generic response for other questions
-  return `Based on the meeting transcript, I can see that your question about "${query}" relates to several points discussed.\n\nWhile I don't have a specific answer extracted yet, you might find relevant information in the Summary or Action Items tabs.\n\n*For more detailed AI-powered analysis of specific questions, connect OpenAI in settings.*`;
 }
