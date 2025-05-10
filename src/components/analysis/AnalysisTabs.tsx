@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Text, FileText, CheckCheck, Book, Search, MessageSquareQuestion } from 'lucide-react';
+import { Text, FileText, CheckCheck, Book, Search, MessageSquareQuote } from 'lucide-react';
 
 export function AnalysisTabs() {
   return (
@@ -27,7 +27,7 @@ export function AnalysisTabs() {
         <span className="hidden sm:inline">Deep Dive</span>
       </TabsTrigger>
       <TabsTrigger value="questions" className="flex items-center gap-2">
-        <MessageSquareQuestion className="h-4 w-4" />
+        <MessageSquareQuote className="h-4 w-4" />
         <span className="hidden sm:inline">Q&A</span>
       </TabsTrigger>
     </TabsList>

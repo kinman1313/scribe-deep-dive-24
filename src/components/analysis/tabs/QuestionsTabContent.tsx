@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Send } from 'lucide-react';
 import { AnalysisLoader } from '../utils/AnalysisLoader';
 import { MarkdownRenderer } from '../utils/MarkdownRenderer';
-import { useSupabaseClient } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/use-toast';
 
 interface QuestionsTabContentProps {
@@ -18,7 +18,6 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
   const [answer, setAnswer] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [questionHistory, setQuestionHistory] = useState<Array<{question: string, answer: string}>>([]);
-  const supabase = useSupabaseClient();
 
   const handleAskQuestion = async () => {
     if (!question.trim() || isProcessing) return;
@@ -119,7 +118,7 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
         <div className="mb-6 p-4 bg-blue-50 rounded-md">
           <h4 className="font-medium mb-2">Answer:</h4>
           <div className="prose prose-sm max-w-none text-scribe-text">
-            <MarkdownRenderer content={answer} />
+            <MarkdownRenderer text={answer} />
           </div>
         </div>
       )}
@@ -133,7 +132,7 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
               <div key={index} className="border-b pb-3 last:border-b-0">
                 <p className="font-medium text-scribe-primary">Q: {item.question}</p>
                 <div className="mt-2 text-sm text-scribe-text">
-                  <MarkdownRenderer content={item.answer} />
+                  <MarkdownRenderer text={item.answer} />
                 </div>
               </div>
             ))}
