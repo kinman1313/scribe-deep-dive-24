@@ -33,3 +33,8 @@ export interface TranscriptionAnalysis {
   actionItems: ActionItem[];
   keyPoints: string[];
 }
+
+// Add the missing interface
+export interface RecordingInterfaceProps {
+  onTranscriptionReady: (transcription: string, analysis?: TranscriptionAnalysis) => void;
+}

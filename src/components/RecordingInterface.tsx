@@ -7,7 +7,7 @@ import { RecordingButton } from './recording/RecordingButton';
 import { AudioPreview } from './recording/AudioPreview';
 import { TranscriptionFeatures } from './recording/TranscriptionFeatures';
 import { processRecording } from './recording/audioProcessingService';
-import { RecordingInterfaceProps } from './recording/types';
+import { RecordingInterfaceProps, TranscriptionAnalysis } from './recording/types';
 
 export function RecordingInterface({ onTranscriptionReady }: RecordingInterfaceProps) {
   const [isRecording, setIsRecording] = useState<boolean>(false);
