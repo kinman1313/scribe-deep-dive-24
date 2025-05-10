@@ -83,7 +83,7 @@ export function useTranscriptionAnalysis(transcription: string) {
         
         setTodoList(todos);
         
-        // Set insights from the AI analysis or generate a default one
+        // Set insights from the AI analysis
         setInsights(data.insights || generateDefaultInsights(speakerObjects, transcription));
         
         setIsAnalyzing(false);
