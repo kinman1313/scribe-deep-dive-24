@@ -22,7 +22,7 @@ export async function invokeEdgeFunction<T>(functionName: string, payload: any):
     // Check if the user has a valid session
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) {
-      throw new Error(`Authentication error: ${sessionError.message}`);
+      console.warn(`Authentication warning, continuing as anonymous: ${sessionError.message}`);
     }
     
     // Call the edge function with the given name and payload

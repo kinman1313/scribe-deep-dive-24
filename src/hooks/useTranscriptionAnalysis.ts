@@ -88,7 +88,7 @@ export function useTranscriptionAnalysis(transcription: string) {
         setTodoList(todos);
         
         // Set insights from the AI analysis
-        setInsights(data.insights || `## Meeting Analysis\n\nThe AI couldn't generate detailed insights for this meeting. Try analyzing again with a longer transcription or provide more context in the conversation.`);
+        setInsights(data.insights || data.keyPoints?.join('\n\n') || `## Meeting Analysis\n\nThe AI couldn't generate detailed insights for this meeting. Try analyzing again with a longer transcription or provide more context in the conversation.`);
         
         setIsAnalyzing(false);
         setIsAnalysisComplete(true);
