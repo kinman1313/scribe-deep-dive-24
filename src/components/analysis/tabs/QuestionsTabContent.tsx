@@ -46,6 +46,8 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
     setIsLoading(true);
     
     try {
+      console.log("Sending question to Edge Function:", query);
+      
       // Call the Edge Function to get AI-powered answer
       const response = await supabase.functions.invoke('process-audio', {
         body: {
@@ -54,6 +56,8 @@ export function QuestionsTabContent({ transcription, isAnalyzing }: QuestionsTab
           operation: 'ask-question'
         }
       });
+      
+      console.log("Edge function response:", response);
       
       if (response.error) {
         throw new Error(response.error.message);

@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileText, Text } from 'lucide-react';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { FileText } from 'lucide-react';
 import { AnalysisTabs } from './AnalysisTabs';
 import { TranscriptTabContent } from './tabs/TranscriptTabContent';
 import { SummaryTabContent } from './tabs/SummaryTabContent';

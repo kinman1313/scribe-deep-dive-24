@@ -17,6 +17,10 @@ export function useTranscriptionAnalysis(transcription: string) {
     if (!transcription || isAnalyzing) return;
     
     setIsAnalyzing(true);
+    setSummary(''); // Clear any existing data
+    setActionItems([]);
+    setTodoList([]);
+    setInsights('');
     
     // Show toast to inform the user
     toast({
@@ -42,6 +46,7 @@ export function useTranscriptionAnalysis(transcription: string) {
         }
         
         const data = response.data;
+        console.log("Analysis response:", data);
         
         // Extract speakers from the transcription
         const speakerMatches = transcription.match(/([A-Za-z]+):/g) || [];
@@ -63,12 +68,12 @@ export function useTranscriptionAnalysis(transcription: string) {
         setSpeakers(speakerObjects);
         
         // Set the summary from the AI analysis
-        setSummary(data.summary || "No summary was generated. Try analyzing the transcript again.");
+        setSummary(data.summary || "The AI couldn't generate a summary. Please try analyzing the transcript again.");
         
         // Create action items from the AI analysis
         const processedActionItems = data.actionItems?.map((item: any) => ({
           text: item.text,
-          speaker: item.assignee || 'Unknown',
+          speaker: item.assignee || 'Team',
           timestamp: '00:00:00' // We don't have actual timestamps from the AI yet
         })) || [];
         
@@ -84,7 +89,7 @@ export function useTranscriptionAnalysis(transcription: string) {
         setTodoList(todos);
         
         // Set insights from the AI analysis
-        setInsights(data.insights || generateDefaultInsights(speakerObjects, transcription));
+        setInsights(data.insights || `## Meeting Analysis\n\nThe AI couldn't generate detailed insights for this meeting. Try analyzing again with a longer transcription or provide more context in the conversation.`);
         
         setIsAnalyzing(false);
         setIsAnalysisComplete(true);
@@ -115,32 +120,6 @@ export function useTranscriptionAnalysis(transcription: string) {
       });
     }
   }, [transcription, isAnalyzing]);
-
-  // Helper function to generate basic insights if the AI doesn't provide them
-  const generateDefaultInsights = (speakers: Speaker[], text: string): string => {
-    // Count lines as a simple metric
-    const lines = text.split('\n').filter(line => line.trim());
-    
-    // Basic markdown insights
-    let insightsMd = `## Meeting Analysis\n\n`;
-    
-    if (speakers.length > 0) {
-      insightsMd += `### Participation\n\n`;
-      insightsMd += `- **${speakers.length}** participants in the meeting\n`;
-      insightsMd += `- Approximately **${lines.length}** conversation exchanges\n\n`;
-      
-      insightsMd += `### Participants\n\n`;
-      speakers.forEach(speaker => {
-        insightsMd += `- **${speaker.name}**\n`;
-      });
-      insightsMd += `\n`;
-    }
-    
-    insightsMd += `### Meeting Duration\n\n`;
-    insightsMd += `- Estimated duration: **${Math.max(5, Math.round(lines.length / 10))} minutes**\n\n`;
-    
-    return insightsMd;
-  };
 
   return {
     speakers,
