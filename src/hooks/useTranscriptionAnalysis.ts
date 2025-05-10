@@ -29,7 +29,6 @@ export function useTranscriptionAnalysis(transcription: string) {
     });
     
     try {
-      // Process the transcription with OpenAI via Supabase Edge Function
       console.log("Starting transcription analysis...");
       
       // Call the OpenAI-powered edge function to analyze the transcription
