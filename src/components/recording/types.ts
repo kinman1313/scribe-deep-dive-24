@@ -1,36 +1,35 @@
 
+export interface TranscriptionResult {
+  transcription: string;
+  summary?: string;
+  speakers?: Speaker[];
+  actionItems?: ActionItem[];
+  keyPoints?: string[];
+  error?: string;
+  message?: string;
+}
+
 export interface Speaker {
+  id: string;
   name: string;
-  color: string;
 }
 
 export interface ActionItem {
   text: string;
-  speaker: string;
-  timestamp: string;
+  assignee?: string;
+  priority?: 'low' | 'medium' | 'high';
 }
 
-export interface TodoItem {
-  task: string;
-  assignee: string;
-  completed: boolean;
+export interface RecordingOptions {
+  format: 'audio/webm' | 'audio/mp3' | 'audio/wav';
+  duration?: number; // in seconds
+  sampleRate?: number;
+  channels?: number;
 }
 
-export interface MockTranscriptionData {
-  transcription: string;
-  speakers: Speaker[];
+export interface TranscriptionAnalysis {
   summary: string;
+  speakers: Speaker[];
   actionItems: ActionItem[];
-  todoList: TodoItem[];
-  insights: string;
-}
-
-export interface RecordingInterfaceProps {
-  onTranscriptionReady: (text: string) => void;
-}
-
-export interface TranscriptionResult {
-  transcription: string;
-  error?: string;
-  message?: string;
+  keyPoints: string[];
 }

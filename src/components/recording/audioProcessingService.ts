@@ -1,4 +1,3 @@
-
 import { toast } from '@/components/ui/use-toast';
 import { TranscriptionResult } from './types';
 import { supabase } from '@/integrations/supabase/client';
@@ -39,7 +38,6 @@ export async function processRecording(
     console.log("Processing audio recording, size:", 
       (audioBlob.size / (1024 * 1024)).toFixed(2) + "MB");
     
-    // Skip conversion step - we'll use the original audio format directly
     // Generate unique filename based on original format
     const timestamp = Date.now();
     const extension = audioBlob.type.includes('wav') ? '.wav' : 
@@ -70,27 +68,7 @@ export async function processRecording(
     // Upload the file to Supabase Storage
     const filePath = `${userId}/${fileName}`;
     
-    // Check if the 'audio-recordings' bucket exists, if not create it
-    try {
-      const { data: buckets } = await supabase.storage.listBuckets();
-      const audioBucketExists = buckets?.some(bucket => bucket.name === 'audio-recordings');
-      
-      if (!audioBucketExists) {
-        console.log("Creating audio-recordings bucket");
-        const { error: createBucketError } = await supabase.storage.createBucket('audio-recordings', {
-          public: true
-        });
-        
-        if (createBucketError) {
-          console.error("Error creating bucket:", createBucketError);
-          throw new Error(`Failed to create storage bucket: ${createBucketError.message}`);
-        }
-      }
-    } catch (bucketError) {
-      console.error("Error checking/creating buckets:", bucketError);
-      // Continue anyway, in case the error is just due to permissions
-    }
-    
+    // Upload directly to the existing bucket (no need to try creating it)
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('audio-recordings')
       .upload(filePath, audioBlob);
@@ -130,33 +108,6 @@ export async function processRecording(
       clientInfo
     });
     
-    // Direct test of the Edge Function endpoint to check connectivity
-    try {
-      // Using the constant instead of accessing the protected property
-      const SUPABASE_URL = "https://fuqibkjdvpmbegibcyhl.supabase.co";
-      console.log(`Testing direct access to Edge Function at: ${SUPABASE_URL}/functions/v1/process-audio`);
-      
-      // Just log the test result, don't block on it
-      fetch(`${SUPABASE_URL}/functions/v1/process-audio`, {
-        method: 'OPTIONS',
-        headers: {
-          'Origin': window.location.origin
-        }
-      }).then(response => {
-        console.log("Edge Function connectivity test results:", {
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          headers: Object.fromEntries(response.headers.entries()),
-          url: response.url
-        });
-      }).catch(testError => {
-        console.error("Edge Function connectivity test error:", testError);
-      });
-    } catch (testError) {
-      console.error("Edge Function setup test error:", testError);
-    }
-    
     // Call the Edge Function using the Supabase client
     try {
       toast({
@@ -172,7 +123,8 @@ export async function processRecording(
         userId,
         fileSize: audioBlob.size,
         sessionInfo,
-        clientInfo
+        clientInfo,
+        analyze: true // Request additional analysis
       };
       
       // Make the actual call

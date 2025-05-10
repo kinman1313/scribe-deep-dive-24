@@ -1,4 +1,3 @@
-
 import { supabase, checkAuthSession } from '@/integrations/supabase/client';
 import { TranscriptionResult } from '@/components/recording/types';
 import { logError, formatErrorMessage } from '@/utils/errorLogger';
@@ -108,28 +107,7 @@ export class AudioService {
       throw new Error("Your session has expired. Please sign in again before uploading");
     }
     
-    // Check if the bucket exists, if not create it
-    try {
-      const { data: buckets } = await supabase.storage.listBuckets();
-      const audioBucketExists = buckets?.some(bucket => bucket.name === AUDIO_BUCKET_NAME);
-      
-      if (!audioBucketExists) {
-        console.log(`Creating ${AUDIO_BUCKET_NAME} bucket`);
-        const { error: createBucketError } = await supabase.storage.createBucket(AUDIO_BUCKET_NAME, {
-          public: true
-        });
-        
-        if (createBucketError) {
-          console.error("Error creating bucket:", createBucketError);
-          throw new Error(`Failed to create storage bucket: ${createBucketError.message}`);
-        }
-      }
-    } catch (bucketError) {
-      console.error("Error checking/creating buckets:", bucketError);
-      // Continue anyway, in case the error is just due to permissions
-    }
-    
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage (bucket should already exist from our SQL migration)
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(AUDIO_BUCKET_NAME)
       .upload(filePath, file);

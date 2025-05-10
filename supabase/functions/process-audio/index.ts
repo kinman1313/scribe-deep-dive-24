@@ -1,3 +1,4 @@
+
 // Follow this setup guide to integrate the Supabase Edge Functions Starter:
 // https://supabase.io/docs/guides/functions/quickstart
 
@@ -20,26 +21,42 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 
 // Types
 interface RequestPayload {
-  audioUrl: string
-  fileName: string
-  userId: string
-  fileSize?: number
+  audioUrl: string;
+  fileName: string;
+  userId: string;
+  fileSize?: number;
+  analyze?: boolean; // Whether to run additional analysis
   clientInfo?: {
-    timestamp: string
-    userAgent: string
-    origin: string
-  }
+    timestamp: string;
+    userAgent: string;
+    origin: string;
+  };
   sessionInfo?: {
-    userId: string
-    hasSession: boolean
-    expiresAt: string
-  }
+    userId: string;
+    hasSession: boolean;
+    expiresAt: string;
+  };
 }
 
 interface TranscriptionResult {
-  transcription: string
-  error?: string
-  message?: string
+  transcription: string;
+  summary?: string;
+  speakers?: Speaker[];
+  actionItems?: ActionItem[];
+  keyPoints?: string[];
+  error?: string;
+  message?: string;
+}
+
+interface Speaker {
+  id: string;
+  name: string;
+}
+
+interface ActionItem {
+  text: string;
+  assignee?: string;
+  priority?: 'low' | 'medium' | 'high';
 }
 
 // Helper functions
@@ -91,6 +108,7 @@ serve(async (req) => {
       console.log(`[${requestId}] Request payload received with properties:`, Object.keys(requestData));
       console.log(`[${requestId}] Audio URL: ${requestData.audioUrl?.substring(0, 50)}...`);
       console.log(`[${requestId}] File name: ${requestData.fileName}`);
+      console.log(`[${requestId}] Analyze: ${requestData.analyze || false}`);
       
       // Log client info if available
       if (requestData.clientInfo) {
@@ -106,7 +124,7 @@ serve(async (req) => {
     }
     
     // Validate required fields but don't fail the request
-    const { audioUrl, fileName, userId } = requestData;
+    const { audioUrl, fileName, userId, analyze = false } = requestData;
     if (!audioUrl || !fileName || !userId) {
       console.error(`[${requestId}] Missing required fields in payload:`, { 
         hasAudioUrl: !!audioUrl, 
@@ -283,12 +301,34 @@ serve(async (req) => {
           message: 'Using mock data due to invalid OpenAI response format'
         }, 200);
       }
+
+      // Get the transcription text
+      const transcriptionText = transcriptionData.text;
+      const result: TranscriptionResult = { transcription: transcriptionText };
+
+      // If analysis is requested, process the transcription further
+      if (analyze) {
+        try {
+          console.log(`[${requestId}] Analysis requested, processing transcription...`);
+          const analysisData = await analyzeTranscription(transcriptionText, requestId);
+          
+          // Add analysis data to the result
+          result.summary = analysisData.summary;
+          result.speakers = analysisData.speakers;
+          result.actionItems = analysisData.actionItems;
+          result.keyPoints = analysisData.keyPoints;
+          
+          console.log(`[${requestId}] Analysis completed successfully`);
+        } catch (analysisError) {
+          console.error(`[${requestId}] Error during analysis:`, analysisError);
+          // Continue with just the transcription if analysis fails
+          result.message = "Transcription successful, but analysis failed";
+        }
+      }
       
-      // Return successful transcription
-      console.log(`[${requestId}] Successfully received transcription from OpenAI`);
-      return createJsonResponse({
-        transcription: transcriptionData.text
-      }, 200);
+      // Return successful transcription with optional analysis
+      console.log(`[${requestId}] Successfully received transcription from OpenAI` + (analyze ? " with analysis" : ""));
+      return createJsonResponse(result, 200);
       
     } catch (error) {
       console.error(`[${requestId}] Unhandled error during transcription process:`, error);
@@ -339,4 +379,116 @@ Sarah: Just a reminder that we need to finalize the budget allocation by next Mo
 
 John: Noted. Let's plan to wrap that up today if possible.
 `;
+}
+
+/**
+ * Analyze a transcription to extract summary, speakers, action items, and key points
+ */
+async function analyzeTranscription(transcription: string, requestId: string) {
+  console.log(`[${requestId}] Starting transcription analysis`);
+  
+  // Default result in case of errors
+  const defaultResult = {
+    summary: "Meeting summary not available.",
+    speakers: [] as Speaker[],
+    actionItems: [] as ActionItem[],
+    keyPoints: [] as string[]
+  };
+  
+  if (!OPENAI_API_KEY) {
+    console.log(`[${requestId}] No OpenAI API key for analysis, returning default result`);
+    return defaultResult;
+  }
+  
+  try {
+    console.log(`[${requestId}] Calling OpenAI for transcription analysis`);
+    
+    // Create a structured prompt for the analysis
+    const messages = [
+      {
+        role: "system",
+        content: `You are an AI trained to analyze meeting transcriptions. Extract the following information:
+        1. A concise summary of the meeting (3-4 sentences)
+        2. The list of speakers and assign them proper names based on the transcript
+        3. Any action items mentioned (with assignee if specified and priority level)
+        4. Key discussion points from the meeting
+        
+        Format your response as JSON with the following structure:
+        {
+          "summary": "Meeting summary here",
+          "speakers": [{"id": "speaker1", "name": "John"}, {"id": "speaker2", "name": "Sarah"}],
+          "actionItems": [{"text": "Action item description", "assignee": "John", "priority": "high"}],
+          "keyPoints": ["Key point 1", "Key point 2"]
+        }
+        
+        Ensure the JSON is valid, properly formatted, and all fields are included.`
+      },
+      {
+        role: "user",
+        content: `Please analyze this meeting transcript: \n\n${transcription}`
+      }
+    ];
+    
+    // Call OpenAI API for analysis
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: messages,
+        temperature: 0.3, // Lower temperature for more consistent results
+        max_tokens: 1000
+      })
+    });
+    
+    if (!response.ok) {
+      console.error(`[${requestId}] OpenAI Analysis API error:`, response.status, response.statusText);
+      return defaultResult;
+    }
+    
+    const data = await response.json();
+    if (!data.choices || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
+      console.error(`[${requestId}] Invalid response from OpenAI Analysis:`, data);
+      return defaultResult;
+    }
+    
+    const content = data.choices[0].message.content;
+    
+    // Extract the JSON from the response
+    let jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
+                    content.match(/```([\s\S]*?)```/) ||
+                    content.match(/{[\s\S]*}/);
+                    
+    let jsonContent = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content;
+    
+    // Handle case where markdown formatting wasn't used
+    if (!jsonContent.includes('{')) {
+      jsonContent = content;
+    }
+    
+    // Clean up the string to ensure it's valid JSON
+    jsonContent = jsonContent.replace(/^```json/, '').replace(/```$/, '').trim();
+    
+    console.log(`[${requestId}] Parsing analysis JSON:`, jsonContent.substring(0, 100) + '...');
+    
+    // Parse the JSON
+    const analysisResult = JSON.parse(jsonContent);
+    
+    // Ensure all required fields exist
+    const result = {
+      summary: analysisResult.summary || defaultResult.summary,
+      speakers: analysisResult.speakers || defaultResult.speakers,
+      actionItems: analysisResult.actionItems || defaultResult.actionItems,
+      keyPoints: analysisResult.keyPoints || defaultResult.keyPoints
+    };
+    
+    console.log(`[${requestId}] Analysis completed successfully`);
+    return result;
+  } catch (error) {
+    console.error(`[${requestId}] Error during transcription analysis:`, error);
+    return defaultResult;
+  }
 }
