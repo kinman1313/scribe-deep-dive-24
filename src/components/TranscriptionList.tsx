@@ -75,7 +75,7 @@ const TranscriptionList = ({ onSelect }: TranscriptionListProps) => {
           <p>Failed to load your transcriptions. Please try again later.</p>
         </CardContent>
         <CardFooter>
-          <Button>Retry</Button>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
         </CardFooter>
       </Card>
     );
@@ -100,7 +100,7 @@ const TranscriptionList = ({ onSelect }: TranscriptionListProps) => {
       {transcriptions.map((transcription) => (
         <Card 
           key={transcription.id}
-          className={`cursor-pointer transition-all ${selectedId === transcription.id ? 'ring-2 ring-primary' : ''}`}
+          className={`cursor-pointer transition-all hover:shadow-md ${selectedId === transcription.id ? 'ring-2 ring-primary' : ''}`}
           onClick={() => {
             setSelectedId(transcription.id);
             onSelect(transcription);
@@ -121,8 +121,17 @@ const TranscriptionList = ({ onSelect }: TranscriptionListProps) => {
             </p>
           </CardContent>
           <CardFooter className="pt-0">
-            <Button variant="ghost" size="sm" className="text-xs">
-              <FileText className="h-3 w-3 mr-1" /> View
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-xs hover:bg-primary/10"
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card click
+                setSelectedId(transcription.id);
+                onSelect(transcription);
+              }}
+            >
+              <FileText className="h-3 w-3 mr-1" /> View Details
             </Button>
           </CardFooter>
         </Card>

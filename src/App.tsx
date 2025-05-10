@@ -9,6 +9,8 @@ import { AuthLayout, ProtectedLayout } from "@/components/Layout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
 
 const queryClient = new QueryClient();
 
@@ -28,7 +30,8 @@ const App = () => (
             {/* Protected routes */}
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Index />} />
-              {/* Add more protected routes here */}
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/profile" element={<Profile />} />
             </Route>
 
             {/* Catch-all */}
